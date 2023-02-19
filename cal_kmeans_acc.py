@@ -1,11 +1,4 @@
-with open("/data/ahngeo11/svt/outputs/kth/cut-one/kmeans.txt", 'r') as f :
-    kmeans_results = f.readlines()
-    
-labels = []
-with open("/data/ahngeo11/svt/datasets/annotations/kth_fe_videos.txt", 'r') as f :
-    label_data = f.readlines()
-    for line in label_data :
-        labels.append(line.strip('\n').split()[-1])
+import argparse
 
 # n_classes = 6 
 # for offset in range(n_classes) :
@@ -255,7 +248,21 @@ def accuracy(output, target, topk=(1,)):
         return res
 
 
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser('')
+    parser.add_argument('--kmeans_results_path', type=str)
 
-import numpy as np
-total_acc= split_cluster_acc_v2(np.array([int(labels[i]) for i in range(len(labels))]), np.array([int(kmeans_results[i]) for i in range(len(kmeans_results))]))
-print(total_acc)
+    args = parser.parse_args()
+
+    with open(args.kmeans_results_path, 'r') as f :
+        kmeans_results = f.readlines()
+        
+    labels = []
+    with open("/data/geo123/features/datasets/annotations/kth_fe_videos.txt", 'r') as f :
+        label_data = f.readlines()
+        for line in label_data :
+            labels.append(line.strip('\n').split()[-1])
+
+    import numpy as np
+    total_acc= split_cluster_acc_v2(np.array([int(labels[i]) for i in range(len(labels))]), np.array([int(kmeans_results[i]) for i in range(len(kmeans_results))]))
+    print(total_acc)
