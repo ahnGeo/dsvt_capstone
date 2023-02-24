@@ -23,6 +23,7 @@ from torch import nn
 from datasets.hmdb51 import HMDB51
 from datasets.ucf101 import UCF101
 from datasets.kth import KTH
+from datasets.diving48 import Diving48
 from models import get_vit_base_patch16_224
 from utils import utils
 from utils.parser import load_config
@@ -35,7 +36,9 @@ def extract_feature_pipeline(args):
     config = load_config(args)
     # config.DATA.PATH_TO_DATA_DIR = f"{os.path.expanduser('~')}/repo/mmaction2/data/{args.dataset}/knn_splits"
     # config.DATA.PATH_PREFIX = f"{os.path.expanduser('~')}/repo/mmaction2/data/{args.dataset}/videos"
+    
     config.TEST.NUM_SPATIAL_CROPS = 1
+    
     if args.dataset == "ucf101":
         # dataset_train = UCFReturnIndexDataset(cfg=config, mode="train", num_retries=10)
         dataset_val = UCFReturnIndexDataset(cfg=config, mode="val", num_retries=10)
@@ -45,6 +48,8 @@ def extract_feature_pipeline(args):
     if args.dataset == "kth":
         # dataset_train = UCFReturnIndexDataset(cfg=config, mode="train", num_retries=10)
         dataset_val = KTHReturnIndexDataset(cfg=config, mode="fe", num_retries=10)
+    if args.dataset == "diving48":
+        dataset_val = DIVING48ReturnIndexDataset(cfg=config, mode="fe", num_retries=10)
     else:
         raise NotImplementedError(f"invalid dataset: {args.dataset}")
 
@@ -83,9 +88,11 @@ def extract_feature_pipeline(args):
     print("Extracting features for val set...")
     test_features = extract_features(model, data_loader_val)
 
-    if utils.get_rank() == 0:
+    # if utils.get_rank() == 0:
         # train_features = nn.functional.normalize(train_features, dim=1, p=2)
-        test_features = nn.functional.normalize(test_features, dim=1, p=2)
+        # test_features = nn.functional.normalize(test_features, dim=1, p=2)
+        #! svt give normed features
+        
 
     # train_labels = torch.tensor([s for s in dataset_train._labels]).long()
     test_labels = torch.tensor([s for s in dataset_val._labels]).long()
@@ -210,6 +217,11 @@ class HMDBReturnIndexDataset(HMDB51):
 class KTHReturnIndexDataset(KTH):
     def __getitem__(self, idx):
         img, _, _, _ = super(KTHReturnIndexDataset, self).__getitem__(idx)
+        return img, idx
+
+class DIVING48ReturnIndexDataset(Diving48):
+    def __getitem__(self, idx):
+        img, _, _, _ = super(DIVING48ReturnIndexDataset, self).__getitem__(idx)
         return img, idx
 
 if __name__ == '__main__':

@@ -34,7 +34,10 @@ def extract_feature_pipeline(args):
     config = load_config(args)
     # config.DATA.PATH_TO_DATA_DIR = f"{os.path.expanduser('~')}/repo/mmaction2/data/{args.dataset}/knn_splits"
     # config.DATA.PATH_PREFIX = f"{os.path.expanduser('~')}/repo/mmaction2/data/{args.dataset}/videos"
+    
+    #!!!!!!!!!!!! set crop one
     config.TEST.NUM_SPATIAL_CROPS = 1
+    
     if args.dataset == "ucf101":
         # dataset_train = UCFReturnIndexDataset(cfg=config, mode="train", num_retries=10)
         dataset_val = UCFReturnIndexDataset(cfg=config, mode="val", num_retries=10)

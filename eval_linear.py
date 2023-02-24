@@ -25,6 +25,7 @@ from models import get_vit_base_patch16_224, get_aux_token_vit, SwinTransformer3
 from utils import utils
 from utils.meters import TestMeter
 from utils.parser import load_config
+# from torchsummary import summary as summary
 
 
 def eval_linear(args):
@@ -87,13 +88,16 @@ def eval_linear(args):
 
     print(f"Data loaded with {len(dataset_train)} train and {len(dataset_val)} val imgs.")
 
+    #!!!!!!!
+    #! We replace the projection head over the SVT with a randomly initialized linear layer, initialize the SVT backbone
+
     # ============ building network ... ============
     if config.DATA.USE_FLOW or config.MODEL.TWO_TOKEN:
         model = get_aux_token_vit(cfg=config, no_head=True)
         model_embed_dim = 2 * model.embed_dim
     else:
         if args.arch == "vit_base":
-            model = get_vit_base_patch16_224(cfg=config, no_head=True)
+            model = get_vit_base_patch16_224(cfg=config, no_head=True)     #^ no head = True
             model_embed_dim = model.embed_dim
         elif args.arch == "swin":
             model = SwinTransformer3D(depths=[2, 2, 18, 2], embed_dim=128, num_heads=[4, 8, 16, 32])
@@ -137,7 +141,7 @@ def eval_linear(args):
         args.lr,
         momentum=0.9,
         # weight_decay=0, # we do not apply weight decay
-        weight_decay=0.0001, # we do not apply weight decay        
+        weight_decay=0.0001        
     )
     # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, args.epochs, eta_min=0)
     scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[11,14], gamma=0.1)
@@ -156,6 +160,11 @@ def eval_linear(args):
     )
     start_epoch = to_restore["epoch"]
     best_acc = to_restore["best_acc"]
+
+    print("train model")
+    # summary(model, (3, 224, 224))
+    for name, param in model.named_parameters() :
+        print(name, param.requires_grad)
 
     for epoch in range(start_epoch, args.epochs):
         train_loader.sampler.set_epoch(epoch)
@@ -184,6 +193,10 @@ def eval_linear(args):
             }
             torch.save(save_dict, os.path.join(args.output_dir, "checkpoint.pth.tar"))
 
+    print("val model on multiview")
+    for name, param in model.named_parameters() :
+        print(name, param.requires_grad)
+        
     test_stats = validate_network_multi_view(multi_crop_val_loader, model, linear_classifier, args.n_last_blocks,
                                              args.avgpool_patchtokens, config)
     print(test_stats)
