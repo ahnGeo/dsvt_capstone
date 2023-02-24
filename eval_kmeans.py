@@ -1,20 +1,8 @@
-# Copyright (c) Facebook, Inc. and its affiliates.
-# 
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-# 
-#     http://www.apache.org/licenses/LICENSE-2.0
-# 
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
+from sklearn.cluster import KMeans
+import pickle
 import argparse
-import os
 import torch
+<<<<<<< HEAD
 import torch.backends.cudnn as cudnn
 import torch.distributed as dist
 import torch.utils.data
@@ -213,70 +201,39 @@ class HMDBReturnIndexDataset(HMDB51):
     def __getitem__(self, idx):
         img, _, _, _ = super(HMDBReturnIndexDataset, self).__getitem__(idx)
         return img, idx
+=======
+from torch.nn.functional import normalize
+>>>>>>> 77fc7db5fe48bb8e07972d366ec2e88103beae16
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser('Evaluation with weighted k-NN on ImageNet')
-    parser.add_argument('--batch_size_per_gpu', default=128, type=int, help='Per-GPU batch-size')
-    parser.add_argument('--nb_knn', default=[10, 20, 100, 200], nargs='+', type=int,
-        help='Number of NN to use. 20 is usually working the best.')
-    parser.add_argument('--temperature', default=0.07, type=float,
-        help='Temperature used in the voting coefficient')
-    parser.add_argument('--pretrained_weights', default='', type=str, help="Path to pretrained weights to evaluate.")
-    parser.add_argument('--use_cuda', default=True, type=utils.bool_flag,
-                        help="Should we store the features on GPU? We recommend setting this to False if you encounter OOM")
-    parser.add_argument('--arch', default='vit_small', type=str,
-        choices=['vit_tiny', 'vit_small', 'vit_base', 'timesformer'], help='Architecture (support only ViT atm).')
-    parser.add_argument('--patch_size', default=16, type=int, help='Patch resolution of the model.')
-    parser.add_argument("--checkpoint_key", default="teacher", type=str,
-        help='Key to use in the checkpoint (example: "teacher")')
-    parser.add_argument('--dump_features', default=None,
-        help='Path where to save computed features, empty for no saving')
-    parser.add_argument('--load_features', default=None, help="""If the features have
-        already been computed, where to find them.""")
-    parser.add_argument('--num_workers', default=10, type=int, help='Number of data loading workers per GPU.')
-    parser.add_argument("--dist_url", default="env://", type=str, help="""url used to set up
-        distributed training; see https://pytorch.org/docs/stable/distributed.html""")
-    parser.add_argument("--local_rank", default=0, type=int, help="Please ignore and do not set this argument.")
-    parser.add_argument('--data_path', default='/path/to/imagenet/', type=str)
-
-    parser.add_argument('--dataset', default="ucf101", help='Dataset: ucf101 / hmdb51')
-    parser.add_argument("--cfg", dest="cfg_file", help="Path to the config file", type=str,
-                        default="models/configs/Kinetics/TimeSformer_divST_8x32_224.yaml")
-    parser.add_argument("--opts", help="See utils/defaults.py for all options", default=None, nargs=argparse.REMAINDER)
+    parser = argparse.ArgumentParser('')
+    parser.add_argument('--feature_path', type=str)
+    parser.add_argument('--output_path', type=str)
 
     args = parser.parse_args()
 
-    utils.init_distributed_mode(args)
-    print("git:\n  {}\n".format(utils.get_sha()))
-    print("\n".join("%s: %s" % (k, str(v)) for k, v in sorted(dict(vars(args)).items())))
-    cudnn.benchmark = True
+    with open(args.feature_path, 'rb') as f :
+        data = pickle.load(f)    
+    
+    if type(data) == list :
+        data = torch.tensor(data)
+    
+    data_norm = normalize(data, dim=1)
+    
+    kmeans = KMeans(n_clusters=6)
+    kmeans.fit(data)
+    pred = kmeans.predict(data)
+    pred = pred.tolist()
+    pred = [str(pred[i]) for i in range(len(pred))]
+    
+    with open(args.output_path, 'w') as f :
+        f.write('\n'.join(pred) + '\n')
 
-    #@ load path : self.cfg.DATA.PATH_TO_DATA_DIR, "ucf101_{}_split_1_videos.txt".format(self.mode)
-    #@ cfg : args.cfg default="models/configs/Kinetics/TimeSformer_divST_8x32_224.yaml"
-
-    if args.load_features:
-        train_features = torch.load(os.path.join(args.load_features, "trainfeat.pth"))
-        test_features = torch.load(os.path.join(args.load_features, "testfeat.pth"))
-        train_labels = torch.load(os.path.join(args.load_features, "trainlabels.pth"))
-        test_labels = torch.load(os.path.join(args.load_features, "testlabels.pth"))
-    else:
-        # need to extract features !
-        # train_features, test_features, train_labels, test_labels = extract_feature_pipeline(args)
-        test_features, test_labels = extract_feature_pipeline(args)
-
-    #* dump features at args.dump_features
-    print("end...")
-
-    # if utils.get_rank() == 0:
-    #     if args.use_cuda:
-    #         train_features = train_features.cuda()
-    #         test_features = test_features.cuda()
-    #         train_labels = train_labels.cuda()
-    #         test_labels = test_labels.cuda()
-
-    #     print("Features are ready!\nStart the k-NN classification.")
-    #     for k in args.nb_knn:
-    #         top1, top5 = knn_classifier(train_features, train_labels,
-    #             test_features, test_labels, k, args.temperature)
-    #         print(f"{k}-NN classifier result: Top1: {top1}, Top5: {top5}")
-    # dist.barrier()
+    kmeans = KMeans(n_clusters=6, random_state=77)
+    kmeans.fit(data_norm)
+    pred = kmeans.predict(data_norm)
+    pred = pred.tolist()
+    pred = [str(pred[i]) for i in range(len(pred))]
+    
+    with open(args.output_path.split(".")[0] + "_norm.txt", 'w') as f :
+        f.write('\n'.join(pred) + '\n')
