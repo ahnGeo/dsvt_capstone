@@ -20,7 +20,7 @@ from pathlib import Path
 from torch import nn
 from tqdm import tqdm
 
-from datasets import UCF101, HMDB51, Kinetics, KTH
+from datasets import UCF101, HMDB51, Kinetics, KTH, Diving48
 from models import get_vit_base_patch16_224, get_aux_token_vit, SwinTransformer3D
 from utils import utils
 from utils.meters import TestMeter
@@ -61,6 +61,12 @@ def eval_linear(args):
         dataset_val = KTH(cfg=config, mode="val", num_retries=10)
         config.TEST.NUM_SPATIAL_CROPS = 3
         multi_crop_val = KTH(cfg=config, mode="val", num_retries=10)
+    elif args.dataset == "diving48" :
+        dataset_train = Diving48(cfg=config, mode="train", num_retries=10)
+        dataset_val = Diving48(cfg=config, mode="val", num_retries=10)
+        config.TEST.NUM_SPATIAL_CROPS=3
+        config.NUM_ENSEMBLE_VIEWS=5
+        multi_crop_val=Diving48(cfg=config, mode="val", num_retries=10)
     else:
         raise NotImplementedError(f"invalid dataset: {args.dataset}")
 
@@ -117,7 +123,7 @@ def eval_linear(args):
     print(f"Model {args.arch} {args.patch_size}x{args.patch_size} built.")
     # load weights to evaluate
 
-    linear_classifier = LinearClassifier(model_embed_dim * (args.n_last_blocks + int(args.avgpool_patchtokens)),
+    linear_classifier = LinearClassifier(model_embed_dim,
                                          num_labels=args.num_labels)
     linear_classifier = linear_classifier.cuda()
     linear_classifier = nn.parallel.DistributedDataParallel(linear_classifier, device_ids=[args.gpu])
@@ -161,10 +167,7 @@ def eval_linear(args):
     start_epoch = to_restore["epoch"]
     best_acc = to_restore["best_acc"]
 
-    print("train model")
-    # summary(model, (3, 224, 224))
-    for name, param in model.named_parameters() :
-        print(name, param.requires_grad)
+    
 
     for epoch in range(start_epoch, args.epochs):
         train_loader.sampler.set_epoch(epoch)
@@ -193,10 +196,6 @@ def eval_linear(args):
             }
             torch.save(save_dict, os.path.join(args.output_dir, "checkpoint.pth.tar"))
 
-    print("val model on multiview")
-    for name, param in model.named_parameters() :
-        print(name, param.requires_grad)
-        
     test_stats = validate_network_multi_view(multi_crop_val_loader, model, linear_classifier, args.n_last_blocks,
                                              args.avgpool_patchtokens, config)
     print(test_stats)
@@ -210,21 +209,51 @@ def train(model, linear_classifier, optimizer, loader, epoch, n, avgpool):
     metric_logger = utils.MetricLogger(delimiter="  ")
     metric_logger.add_meter('lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
     header = 'Epoch: [{}]'.format(epoch)
+    
+    # blocks.11.mlp.fc1.bias True
+    # blocks.11.mlp.fc2.weight True
+    # blocks.11.mlp.fc2.bias True
+    # norm.weight True
+#     # norm.bias True
+#     cls_token True
+# pos_embed True
+# time_embed True
+# patch_embed.proj.weight True
+# patch_embed.proj.bias
+    if n == -1 : 
+        print("#################################################\nlinear probing\n#################################################")
+    elif n == 0 :
+        print("#################################################\nfull finetuning\n#################################################")
+    else :
+        print(f"#################################################\nfinetuning with {n} layers\n#################################################")
+    
+    if n >= 1 :
+        assert args.arch == "vit_base"
+        # then
+        on_block = [str(12 - i) for i in range(1, n + 1)]    #* finetune only the last layer -> on_block = ["11"]
+        for name, param in model.named_parameters() :
+            if "." not in name :
+                param.requires_grad = False
+            elif name.split(".")[1] in on_block : 
+                param.requires_grad = True
+            elif name == "norm.weight" or name == "norm.bias" :
+                param.requires_grad = True
+            else :
+                param.requires_grad = False
+        
+    
     for (inp, target, sample_idx, meta) in metric_logger.log_every(loader, 20, header):
         # move to gpu
         inp = inp.cuda(non_blocking=True)
         target = target.cuda(non_blocking=True)
 
         # forward
-        with torch.no_grad():
-            # intermediate_output = model.get_intermediate_layers(inp, n)
-            # output = [x[:, 0] for x in intermediate_output]
-            # if avgpool:
-            #     output.append(torch.mean(intermediate_output[-1][:, 1:], dim=1))
-            # output = torch.cat(output, dim=-1)
-
+        if n == -1 :
+            with torch.no_grad():
+                output = model(inp)
+        else : 
             output = model(inp)
-
+            
         output = linear_classifier(output)
 
         # compute cross entropy loss
@@ -265,7 +294,7 @@ def validate_network(val_loader, model, linear_classifier, n, avgpool):
             #     output.append(torch.mean(intermediate_output[-1][:, 1:], dim=1))
             # output = torch.cat(output, dim=-1)
             output = model(inp)
-        output = linear_classifier(output)
+            output = linear_classifier(output)
         loss = nn.CrossEntropyLoss()(output, target)
 
         if linear_classifier.module.num_labels >= 5:
@@ -301,6 +330,7 @@ def validate_network_multi_view(val_loader, model, linear_classifier, n, avgpool
         )
     test_meter.iter_tic()
 
+
     for cur_iter, (inp, target, sample_idx, meta) in tqdm(enumerate(val_loader), total=len(val_loader)):
         # move to gpu
         inp = inp.cuda(non_blocking=True)
@@ -310,7 +340,8 @@ def validate_network_multi_view(val_loader, model, linear_classifier, n, avgpool
         # forward
         with torch.no_grad():
             output = model(inp)
-        output = linear_classifier(output)
+            
+            output = linear_classifier(output)
 
         output = output.cpu()
         target = target.cpu()
@@ -348,8 +379,7 @@ class LinearClassifier(nn.Module):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser('Evaluation with linear classification on ImageNet')
-    parser.add_argument('--n_last_blocks', default=4, type=int, help="""Concatenate [CLS] tokens
-        for the `n` last blocks. We use `n=4` when evaluating ViT-Small and `n=1` with ViT-Base.""")
+    parser.add_argument('--n_last_blocks', default=4, type=int, help=">=1 is turn on some layers for finetuning, 0 is full finetuning, -1 is linear probing")
     parser.add_argument('--avgpool_patchtokens', default=False, type=utils.bool_flag,
                         help="""Whether ot not to concatenate the global average pooled features to the [CLS] token.
         We typically set this to False for ViT-Small and to True with ViT-Base.""")

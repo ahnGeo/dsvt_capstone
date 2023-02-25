@@ -68,7 +68,7 @@ class Diving48(torch.utils.data.Dataset):
         """
         path_to_file = os.path.join(
             # self.cfg.DATA.PATH_TO_DATA_DIR, "ucf101_{}_split_1_videos_simple.txt".format(self.mode)
-            "/data/ahngeo11/svt/datasets/annotations/diving48_{}}_videos.txt".format(self.mode)
+            "/data/ahngeo11/svt/datasets/annotations/diving48_{}_videos.txt".format(self.mode)
             
         )
         assert os.path.exists(path_to_file), "{} dir not found".format(
@@ -79,6 +79,7 @@ class Diving48(torch.utils.data.Dataset):
         self._labels = []
         self._spatial_temporal_idx = []
         with open(path_to_file, "r") as f:
+            print(self.cfg.DATA.PATH_LABEL_SEPARATOR)
             for clip_idx, path_label in enumerate(f.read().splitlines()):
                 assert (
                         len(path_label.split(self.cfg.DATA.PATH_LABEL_SEPARATOR))
@@ -94,8 +95,8 @@ class Diving48(torch.utils.data.Dataset):
                     self._labels.append(int(label))
                     self._spatial_temporal_idx.append(idx)
                     self._video_meta[clip_idx * self._num_clips + idx] = {}
-        assert (len(self._path_to_videos) > 0), f"Failed to load KTH split {self._split_idx} from {path_to_file}"
-        print(f"Constructing KTH dataloader (size: {len(self._path_to_videos)}) from {path_to_file}")
+        assert (len(self._path_to_videos) > 0), f"Failed to load Diving48 split {self._split_idx} from {path_to_file}"
+        print(f"Constructing Diving48 dataloader (size: {len(self._path_to_videos)}) from {path_to_file}")
 
     def __getitem__(self, index):
         """

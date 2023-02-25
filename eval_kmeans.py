@@ -2,7 +2,6 @@ from sklearn.cluster import KMeans
 import pickle
 import argparse
 import torch
-<<<<<<< HEAD
 import torch.backends.cudnn as cudnn
 import torch.distributed as dist
 import torch.utils.data
@@ -201,9 +200,7 @@ class HMDBReturnIndexDataset(HMDB51):
     def __getitem__(self, idx):
         img, _, _, _ = super(HMDBReturnIndexDataset, self).__getitem__(idx)
         return img, idx
-=======
 from torch.nn.functional import normalize
->>>>>>> 77fc7db5fe48bb8e07972d366ec2e88103beae16
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser('')
