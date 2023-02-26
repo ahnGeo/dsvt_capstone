@@ -59,7 +59,7 @@ class Diving48(torch.utils.data.Dataset):
                     cfg.TEST.NUM_ENSEMBLE_VIEWS * cfg.TEST.NUM_SPATIAL_CROPS
             )
 
-        print("Constructing KTH {}...".format(mode))
+        print("Constructing Diving48 {}...".format(mode))
         self._construct_loader()
 
     def _construct_loader(self):

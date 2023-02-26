@@ -179,7 +179,7 @@ def eval_linear(args):
                      'epoch': epoch}
         if epoch % args.val_freq == 0 or epoch == args.epochs - 1:
             test_stats = validate_network(val_loader, model, linear_classifier, args.n_last_blocks, args.avgpool_patchtokens)
-            print(f"Accuracy at epoch {epoch} of the network on the {len(dataset_val)} test images: {test_stats['acc1']:.1f}%")
+            print(f"Accuracy at epoch {epoch} of the network on the {len(dataset_val)} test images: {test_stats['acc1']:.2f}%")
             best_acc = max(best_acc, test_stats["acc1"])
             print(f'Max accuracy so far: {best_acc:.2f}%')
             log_stats = {**{k: v for k, v in log_stats.items()},
@@ -198,10 +198,11 @@ def eval_linear(args):
 
     test_stats = validate_network_multi_view(multi_crop_val_loader, model, linear_classifier, args.n_last_blocks,
                                              args.avgpool_patchtokens, config)
+    print("multi view results : ")
     print(test_stats)
 
     print("Training of the supervised linear classifier on frozen features completed.\n"
-          "Top-1 test accuracy: {acc:.1f}".format(acc=best_acc))
+          "Top-1 test accuracy: {acc:.2f}".format(acc=best_acc))
 
 
 def train(model, linear_classifier, optimizer, loader, epoch, n, avgpool):
