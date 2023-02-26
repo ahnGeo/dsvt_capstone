@@ -49,19 +49,20 @@ def extract_feature_pipeline(args):
         # dataset_train = UCFReturnIndexDataset(cfg=config, mode="train", num_retries=10)
         dataset_val = KTHReturnIndexDataset(cfg=config, mode="fe", num_retries=10)
     if args.dataset == "diving48":
-        dataset_val = DIVING48ReturnIndexDataset(cfg=config, mode="fe", num_retries=10)
+        dataset_train = DIVING48ReturnIndexDataset(cfg=config, mode="train", num_retries=10)
+        dataset_val = DIVING48ReturnIndexDataset(cfg=config, mode="val", num_retries=10)
     else:
         raise NotImplementedError(f"invalid dataset: {args.dataset}")
 
-    # sampler = torch.utils.data.DistributedSampler(dataset_train, shuffle=False)  #* shuffle=False
-    # data_loader_train = torch.utils.data.DataLoader(
-    #     dataset_train,
-    #     sampler=sampler,
-    #     batch_size=args.batch_size_per_gpu,
-    #     num_workers=args.num_workers,
-    #     pin_memory=True,
-    #     drop_last=False,
-    # )
+    sampler = torch.utils.data.DistributedSampler(dataset_train, shuffle=False)  #* shuffle=False
+    data_loader_train = torch.utils.data.DataLoader(
+        dataset_train,
+        sampler=sampler,
+        batch_size=args.batch_size_per_gpu,
+        num_workers=args.num_workers,
+        pin_memory=True,
+        drop_last=False,
+    )
     data_loader_val = torch.utils.data.DataLoader(
         dataset_val,
         batch_size=args.batch_size_per_gpu,
@@ -84,25 +85,30 @@ def extract_feature_pipeline(args):
 
     # ============ extract features ... ============
     print("Extracting features for train set...")
-    # train_features = extract_features(model, data_loader_train)
+    train_features = extract_features(model, data_loader_train)
     print("Extracting features for val set...")
     test_features = extract_features(model, data_loader_val)
 
-    # if utils.get_rank() == 0:
-        # train_features = nn.functional.normalize(train_features, dim=1, p=2)
-        # test_features = nn.functional.normalize(test_features, dim=1, p=2)
+    if utils.get_rank() == 0:
+        train_features = nn.functional.normalize(train_features, dim=1, p=2)
+        test_features = nn.functional.normalize(test_features, dim=1, p=2)
         #! svt give normed features
         
 
-    # train_labels = torch.tensor([s for s in dataset_train._labels]).long()
+    train_labels = torch.tensor([s for s in dataset_train._labels]).long()
     test_labels = torch.tensor([s for s in dataset_val._labels]).long()
     # save features and labels
     if args.dump_features and dist.get_rank() == 0:
         
+        print("Dump train features, shape : ", train_features.shape)
         print("Dump test features, shape : ", test_features.shape)
         print("Dump test labels, shape : ", test_labels.shape)
         print(test_labels)
         
+        with open(os.path.join(args.dump_features, "trainfeat.pkl"), 'wb') as f :
+            pickle.dump(train_features.tolist(), f)
+        with open(os.path.join(args.dump_features, "trainlabels.pkl"), 'wb') as f :
+            pickle.dump(train_labels.tolist(), f)
         with open(os.path.join(args.dump_features, "testfeat.pkl"), 'wb') as f :
             pickle.dump(test_features.tolist(), f)
         with open(os.path.join(args.dump_features, "testlabels.pkl"), 'wb') as f :
@@ -153,10 +159,10 @@ def extract_features(model, data_loader):
 
         # update storage feature matrix
         if dist.get_rank() == 0:
-            # if args.use_cuda:
-            features.index_copy_(0, index_all, torch.cat(output_l))
-            # else:
-            #     features.index_copy_(0, index_all.cpu(), torch.cat(output_l).cpu())
+            if args.use_cuda:
+                features.index_copy_(0, index_all, torch.cat(output_l))
+            else:
+                features.index_copy_(0, index_all.cpu(), torch.cat(output_l).cpu())
     return features
 
 
