@@ -228,7 +228,7 @@ class Diving48(torch.utils.data.Dataset):
             # Perform color normalization.
             frames = tensor_normalize(
                 frames, self.cfg.DATA.MEAN, self.cfg.DATA.STD
-            )
+            )    
             frames = frames.permute(3, 0, 1, 2)
 
             # Perform data augmentation.

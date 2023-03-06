@@ -34,7 +34,7 @@ from utils import utils
 import vision_transformer as vits
 from vision_transformer import DINOHead, MultiDINOHead
 
-from datasets import Kinetics
+from datasets import Kinetics,Diving48
 from datasets.rand_conv import RandConv
 from models import get_vit_base_patch16_224, get_aux_token_vit, SwinTransformer3D, S3D
 from utils.parser import load_config
@@ -162,7 +162,7 @@ def train_svt(args):
         json.dump(vars(args), open(Path(args.output_dir) / "config.txt", "w"), indent=4)
     config.DATA.PATH_TO_DATA_DIR = args.data_path
     # config.DATA.PATH_PREFIX = os.path.dirname(args.data_path)
-    dataset = Kinetics(cfg=config, mode="train", num_retries=10, get_flow=config.DATA.USE_FLOW)
+    dataset = Diving48(cfg=config, mode="train", num_retries=10)
     sampler = torch.utils.data.DistributedSampler(dataset, shuffle=True)
     data_loader = torch.utils.data.DataLoader(
         dataset,

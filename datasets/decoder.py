@@ -23,7 +23,7 @@ def temporal_sampling(frames, start_idx, end_idx, num_samples):
     """
     index = torch.linspace(start_idx, end_idx, num_samples)
     index = torch.clamp(index, 0, frames.shape[0] - 1).long()
-    # print(index)
+
     frames = torch.index_select(frames, 0, index)
     return frames
 
@@ -55,7 +55,14 @@ def get_start_end_idx(video_size, clip_size, clip_idx, num_clips):
     else:
         # Uniformly sample the clip with the given index.
         start_idx = delta * clip_idx / num_clips
+    
+    # if clip_size > video_size :
+    #     end_idx = start_idx + video_size - 1
+    # else :
+    #     end_idx = start_idx + clip_size - 1
+    
     end_idx = start_idx + clip_size - 1
+
     return start_idx, end_idx
 
 
@@ -86,7 +93,9 @@ def pyav_decode_stream(
     frames = {}
     buffer_count = 0
     max_pts = 0
+    decode_len = 0
     for frame in container.decode(**stream_name):
+        decode_len += 1
         max_pts = max(max_pts, frame.pts)
         if frame.pts < start_pts:
             continue
@@ -259,8 +268,8 @@ def pyav_decode(
         # Perform selective decoding.
         decode_all_video = False
         start_idx, end_idx = get_start_end_idx(
-            frames_length,
-            sampling_rate * num_frames / target_fps * fps,
+            frames_length,   #* original frames len
+            sampling_rate * num_frames / target_fps * fps,    #* clip len
             clip_idx,
             num_clips,
         )

@@ -143,14 +143,14 @@ def eval_linear(args):
     # set optimizer
     optimizer = torch.optim.SGD(
         linear_classifier.parameters(),
-        # args.lr * (args.batch_size_per_gpu * utils.get_world_size()) / 256., # linear scaling rule
-        args.lr,
+        args.lr * (args.batch_size_per_gpu * utils.get_world_size()) / 256., # linear scaling rule
+        # args.lr,
         momentum=0.9,
-        # weight_decay=0, # we do not apply weight decay
-        weight_decay=0.0001        
+        weight_decay=0, # we do not apply weight decay
+        # weight_decay=0.0001        
     )
-    # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, args.epochs, eta_min=0)
-    scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[11,14], gamma=0.1)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, args.epochs, eta_min=0)
+    # scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[11,14], gamma=0.1)
     # scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[6,9], gamma=0.1)
     # scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[28,43], gamma=0.1)
     # scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[15,25], gamma=0.1)
