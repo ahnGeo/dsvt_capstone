@@ -52,7 +52,7 @@ def eval_linear(args):
         config.TEST.NUM_SPATIAL_CROPS = 3
         multi_crop_val = HMDB51(cfg=config, mode="val", num_retries=10)
     elif args.dataset == "kinetics400":
-        dataset_train = Kinetics(cfg=config, mode="train", num_retries=10)
+        dataset_train = Kinetics(cfg=config, mode="test", num_retries=10)
         dataset_val = Kinetics(cfg=config, mode="val", num_retries=10)
         config.TEST.NUM_SPATIAL_CROPS = 3
         multi_crop_val = Kinetics(cfg=config, mode="val", num_retries=10)
@@ -204,6 +204,7 @@ def eval_linear(args):
     print("Training of the supervised linear classifier on frozen features completed.\n"
           "Top-1 test accuracy: {acc:.2f}".format(acc=best_acc))
 
+    return best_acc
 
 def train(model, linear_classifier, optimizer, loader, epoch, n, avgpool):
     linear_classifier.train()
@@ -211,16 +212,6 @@ def train(model, linear_classifier, optimizer, loader, epoch, n, avgpool):
     metric_logger.add_meter('lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
     header = 'Epoch: [{}]'.format(epoch)
     
-    # blocks.11.mlp.fc1.bias True
-    # blocks.11.mlp.fc2.weight True
-    # blocks.11.mlp.fc2.bias True
-    # norm.weight True
-#     # norm.bias True
-#     cls_token True
-# pos_embed True
-# time_embed True
-# patch_embed.proj.weight True
-# patch_embed.proj.bias
     if n == -1 : 
         print("#################################################\nlinear probing\n#################################################")
     elif n == 0 :
@@ -244,6 +235,7 @@ def train(model, linear_classifier, optimizer, loader, epoch, n, avgpool):
         
     
     for (inp, target, sample_idx, meta) in metric_logger.log_every(loader, 20, header):
+        
         # move to gpu
         inp = inp.cuda(non_blocking=True)
         target = target.cuda(non_blocking=True)
@@ -414,4 +406,36 @@ if __name__ == '__main__':
     parser.add_argument("--opts", help="See utils/defaults.py for all options", default=None, nargs=argparse.REMAINDER)
 
     args = parser.parse_args()
-    eval_linear(args)
+    
+    import time
+    
+    start = time.time()
+    
+    best_acc = eval_linear(args)
+
+    end = time.time()
+    
+    import datetime
+    import json
+    import requests
+    import os
+    
+    def notice_message(token, channel, text, attachments):
+        attachments = json.dumps(attachments) 
+        response = requests.post("https://slack.com/api/chat.postMessage",
+            headers={"Authorization": "Bearer "+token},
+            data={"channel": channel, "text": text ,"attachments": attachments})
+    
+    Token = 'xoxb-4894844378726-4901340369155-XVhgVGJvW9fhGQ4C2AVFKwK6' # 자신의 Token 입력
+    job_name=os.environ["SLURM_JOB_NAME"] #자동으로 JOB name받아옴.
+    cluster=os.environ["SLURM_SUBMIT_HOST"] #노드이름도 받아와줌.
+    job_time= str(datetime.timedelta(seconds=(end-start))).split(".")[0]  #total_time_str#이건 내가 추가한변수
+    attach_dict = {
+    'color' : '#ff0000',
+    'author_name' : 'Job Finish',
+    'title' : job_name,
+    'text' : cluster,
+    }
+    attach_list=[attach_dict] 
+    contents=f"Training time is {job_time}\nTop 1 Accuracy is {best_acc}"
+    notice_message(Token, "#notice", contents, attach_list)  # #notice = channel name
