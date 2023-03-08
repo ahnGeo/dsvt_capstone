@@ -346,8 +346,8 @@ class VisionTransformer(nn.Module):
 
     def forward(self, x, use_head=False):
         x = self.forward_features(x)
-        if use_head:
-            x = self.head(x)
+        # if use_head:
+        x = self.head(x)
         return x
 
     def get_intermediate_layers(self, x, n=1):
@@ -600,8 +600,8 @@ def get_vit_base_patch16_224(cfg, no_head=False, **kwargs):
     vit.default_cfg = default_cfgs['vit_base_patch16_224']
     vit.num_patches = (cfg.DATA.TRAIN_CROP_SIZE // patch_size) * (cfg.DATA.TRAIN_CROP_SIZE // patch_size)
     pretrained_model = cfg.TIMESFORMER.PRETRAINED_MODEL
-    if pretrained_model:
-        load_pretrained(vit, num_classes=vit.num_classes, in_chans=kwargs.get('in_chans', 3),
+    # if pretrained_model:
+    load_pretrained(vit, num_classes=vit.num_classes, in_chans=kwargs.get('in_chans', 3),
                         filter_fn=_conv_filter, img_size=cfg.DATA.TRAIN_CROP_SIZE, num_patches=vit.num_patches,
                         attention_type=vit.attention_type, pretrained_model=pretrained_model)
     if no_head:

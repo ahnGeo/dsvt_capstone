@@ -68,7 +68,7 @@ class Diving48(torch.utils.data.Dataset):
         """
         path_to_file = os.path.join(
             # self.cfg.DATA.PATH_TO_DATA_DIR, "ucf101_{}_split_1_videos_simple.txt".format(self.mode)
-            "/data/ahngeo11/svt/datasets/annotations/diving48_{}_videos.txt".format(self.mode)
+            "/data/ahngeo11/svt/datasets/annotations/diving48/diving48_{}_videos.txt".format(self.mode)
             
         )
         assert os.path.exists(path_to_file), "{} dir not found".format(
