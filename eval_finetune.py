@@ -110,13 +110,16 @@ def eval_linear(args):
             model_embed_dim = 1024
         else:
             raise Exception(f"invalid model: {args.arch}")
-    print(args.pretrained_weights)
-    if "pth" in args.pretrained_weights or "pt" in args.pretrained_weights :
-        ckpt = torch.load(args.pretrained_weights)
+
+    if "pth" in args.pretrained_weights or "pt" in args.pretrained_weights or "pyth" in args.pretrained_weights :  #* not any args, initialize with dino weights
+        ckpt = torch.load(args.pretrained_weights)['model_state']
         #  select_ckpt = 'motion_teacher' if args.use_flow else "teacher"
         if "teacher" in ckpt:
             ckpt = ckpt["teacher"]
-        renamed_checkpoint = {x[len("backbone."):]: y for x, y in ckpt.items() if x.startswith("backbone.")}
+        if "svt" in args.pretrained_weights :
+            renamed_checkpoint = {x[len("backbone."):]: y for x, y in ckpt.items() if x.startswith("backbone.")}
+        if "TimeSformer" in args.pretrained_weights :
+            renamed_checkpoint = {x[len("model."):]: y for x, y in ckpt.items() if x.startswith("model.") and not "head" in x}
         msg = model.load_state_dict(renamed_checkpoint, strict=False)
         print(f"Loaded model with msg: {msg}")
         
