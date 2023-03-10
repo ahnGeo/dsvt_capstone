@@ -30,6 +30,10 @@ default_cfgs = {
         url = "https://dl.fbaipublicfiles.com/dino/dino_vitbase16_pretrain/dino_vitbase16_pretrain.pth",
         mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225),
     ),
+    'vit_base_patch16_224_i-1k': _cfg(
+        url='https://github.com/rwightman/pytorch-image-models/releases/download/v0.1-vitjx/jx_vit_base_p16_224-80ecf9dd.pth',
+        mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5),
+    ),
 }
 
 
@@ -388,14 +392,14 @@ class vit_base_patch16_224(nn.Module):
                                        attention_type=cfg.TIMESFORMER.ATTENTION_TYPE, **kwargs)
 
         self.attention_type = cfg.TIMESFORMER.ATTENTION_TYPE
-        self.model.default_cfg = default_cfgs['vit_base_patch16_224']
+        self.model.default_cfg = default_cfgs['vit_base_patch16_224_i-1k']
         self.num_patches = (cfg.DATA.TRAIN_CROP_SIZE // patch_size) * (cfg.DATA.TRAIN_CROP_SIZE // patch_size)
         pretrained_model = cfg.TIMESFORMER.PRETRAINED_MODEL
         if self.pretrained:
             load_pretrained(self.model, num_classes=self.model.num_classes, in_chans=kwargs.get('in_chans', 3),
                             filter_fn=_conv_filter, img_size=cfg.DATA.TRAIN_CROP_SIZE, num_patches=self.num_patches,
-                            attention_type=self.attention_type, pretrained_model=pretrained_model)
-
+                            attention_type=self.attention_type, pretrained_model=pretrained_model)      
+        
     def forward(self, x):
         x = self.model(x)
         return x
@@ -597,13 +601,18 @@ def get_vit_base_patch16_224(cfg, no_head=False, **kwargs):
                             attn_drop_rate=0., drop_path_rate=0.1, num_frames=cfg.DATA.NUM_FRAMES,
                             attention_type=cfg.TIMESFORMER.ATTENTION_TYPE, **kwargs)
     vit.attention_type = cfg.TIMESFORMER.ATTENTION_TYPE
-    vit.default_cfg = default_cfgs['vit_base_patch16_224']
+    vit.default_cfg = default_cfgs['vit_base_patch16_224_i-1k']
     vit.num_patches = (cfg.DATA.TRAIN_CROP_SIZE // patch_size) * (cfg.DATA.TRAIN_CROP_SIZE // patch_size)
     pretrained_model = cfg.TIMESFORMER.PRETRAINED_MODEL
-    # if pretrained_model:
+    # if pretrained_model == "true" :
+    print("set pretrained vit")
     load_pretrained(vit, num_classes=vit.num_classes, in_chans=kwargs.get('in_chans', 3),
                         filter_fn=_conv_filter, img_size=cfg.DATA.TRAIN_CROP_SIZE, num_patches=vit.num_patches,
                         attention_type=vit.attention_type, pretrained_model=pretrained_model)
+        
+    vit.reset_classifier(cfg.MODEL.NUM_CLASSES)
+    print("head.weight : \n", vit.get_classifier().weight.data)  
+        
     if no_head:
         vit.head = None
     return vit

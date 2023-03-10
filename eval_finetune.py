@@ -65,7 +65,7 @@ def eval_linear(args):
         dataset_train = Diving48(cfg=config, mode="train", num_retries=10)
         dataset_val = Diving48(cfg=config, mode="val", num_retries=10)
         config.TEST.NUM_SPATIAL_CROPS=3
-        config.NUM_ENSEMBLE_VIEWS=5
+        config.NUM_ENSEMBLE_VIEWS=1
         multi_crop_val=Diving48(cfg=config, mode="val", num_retries=10)
     else:
         raise NotImplementedError(f"invalid dataset: {args.dataset}")
@@ -111,14 +111,15 @@ def eval_linear(args):
         else:
             raise Exception(f"invalid model: {args.arch}")
 
-    if "pth" in args.pretrained_weights or "pt" in args.pretrained_weights or "pyth" in args.pretrained_weights :  #* not any args, initialize with dino weights
-        ckpt = torch.load(args.pretrained_weights)['model_state']
+    if "pth" in args.pretrained_weights or "pyth" in args.pretrained_weights :  #* not any args, initialize with dino weights
+        # ckpt = torch.load(args.pretrained_weights)['model_state']
+        ckpt = torch.load(args.pretrained_weights)
         #  select_ckpt = 'motion_teacher' if args.use_flow else "teacher"
         if "teacher" in ckpt:
             ckpt = ckpt["teacher"]
-        if "svt" in args.pretrained_weights :
+        if "vitb" in args.pretrained_weights :
             renamed_checkpoint = {x[len("backbone."):]: y for x, y in ckpt.items() if x.startswith("backbone.")}
-        if "TimeSformer" in args.pretrained_weights :
+        elif "TimeSformer" in args.pretrained_weights :
             renamed_checkpoint = {x[len("model."):]: y for x, y in ckpt.items() if x.startswith("model.") and not "head" in x}
         msg = model.load_state_dict(renamed_checkpoint, strict=False)
         print(f"Loaded model with msg: {msg}")
@@ -140,19 +141,11 @@ def eval_linear(args):
         weight_decay=0.0001        
     )
     # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, args.epochs, eta_min=0)
-    # scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[11,14], gamma=0.1)
-    scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[25,45], gamma=0.1)
+    scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[11,14], gamma=0.1)
+    # scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[25,45], gamma=0.1)
 
 
-    # Optionally resume from a checkpoint
     to_restore = {"epoch": 0, "best_acc": 0.}
-    # # utils.restart_from_checkpoint(
-    # #     os.path.join(args.output_dir, "checkpoint.pth.tar"),
-    # #     run_variables=to_restore,
-    # #     state_dict=model,
-    # #     optimizer=optimizer,
-    # #     scheduler=scheduler,
-    # # )
     start_epoch = to_restore["epoch"]
     best_acc = to_restore["best_acc"]
 
@@ -228,7 +221,7 @@ def train(model, optimizer, loader, epoch, n, avgpool):
                 param.requires_grad = True
             else :
                 param.requires_grad = False
-        
+    
 
     for (inp, target, sample_idx, meta) in metric_logger.log_every(loader, 20, header):
         
