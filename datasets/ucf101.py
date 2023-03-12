@@ -162,10 +162,12 @@ class UCF101(torch.utils.data.Dataset):
             raise NotImplementedError(
                 "Does not support {} mode".format(self.mode)
             )
+            
         sampling_rate = get_random_sampling_rate(
             self.cfg.MULTIGRID.LONG_CYCLE_SAMPLING_RATE,
             self.cfg.DATA.SAMPLING_RATE,
         )
+        
         # Try to decode and sample a clip from a video. If the video can not be
         # decoded, repeatedly find a random video replacement that can be decoded.
         for i_try in range(self._num_retries):

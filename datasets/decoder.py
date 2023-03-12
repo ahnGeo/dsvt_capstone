@@ -21,10 +21,9 @@ def temporal_sampling(frames, start_idx, end_idx, num_samples):
         frames (tersor): a tensor of temporal sampled video frames, dimension is
             `num clip frames` x `channel` x `height` x `width`.
     """
-    # index = torch.linspace(start_idx, end_idx, num_samples)
-    index = torch.linspace(0, frames.shape[0] - 1, num_samples).long()
-    # index = torch.clamp(index, 0, frames.shape[0] - 1).long()
-    # index = torch.clamp(index, 0, frames.shape[0] - 1).long()
+    index = torch.linspace(start_idx, end_idx, num_samples)
+    # index = torch.linspace(0, frames.shape[0] - 1, num_samples).long()
+    index = torch.clamp(index, 0, frames.shape[0] - 1).long()
 
     # print(index)
     
@@ -66,6 +65,7 @@ def get_start_end_idx(video_size, clip_size, clip_idx, num_clips):
     #     end_idx = start_idx + clip_size - 1
     # print("video len", video_size, "clip len", clip_size)
     end_idx = start_idx + clip_size - 1
+    # end_idx = start_idx + video_size - 1
 
     return start_idx, end_idx
 

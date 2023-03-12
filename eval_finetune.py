@@ -70,6 +70,8 @@ def eval_linear(args):
     else:
         raise NotImplementedError(f"invalid dataset: {args.dataset}")
 
+    print(config)
+    
     sampler = torch.utils.data.distributed.DistributedSampler(dataset_train)
     train_loader = torch.utils.data.DataLoader(
         dataset_train,
@@ -132,8 +134,8 @@ def eval_linear(args):
     
     # set optimizer
     optimizer = torch.optim.SGD(
-        # model.parameters(),
-        params_groups,
+        model.parameters(),
+        # params_groups,
         args.lr * (args.batch_size_per_gpu * utils.get_world_size()) / 256., # linear scaling rule
         # args.lr,
         momentum=0.9,

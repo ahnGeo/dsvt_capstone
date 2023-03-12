@@ -34,6 +34,10 @@ default_cfgs = {
         url='https://github.com/rwightman/pytorch-image-models/releases/download/v0.1-vitjx/jx_vit_base_p16_224-80ecf9dd.pth',
         mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5),
     ),
+    'deit_base_patch16_224_i-1k': _cfg(
+        url='https://dl.fbaipublicfiles.com/deit/deit_base_patch16_224-b5f2ef4d.pth',
+        mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5),
+    ),
 }
 
 
@@ -601,16 +605,16 @@ def get_vit_base_patch16_224(cfg, no_head=False, **kwargs):
                             attn_drop_rate=0., drop_path_rate=0.1, num_frames=cfg.DATA.NUM_FRAMES,
                             attention_type=cfg.TIMESFORMER.ATTENTION_TYPE, **kwargs)
     vit.attention_type = cfg.TIMESFORMER.ATTENTION_TYPE
-    vit.default_cfg = default_cfgs['vit_base_patch16_224_i-1k']
+    vit.default_cfg = default_cfgs['deit_base_patch16_224_i-1k']
     vit.num_patches = (cfg.DATA.TRAIN_CROP_SIZE // patch_size) * (cfg.DATA.TRAIN_CROP_SIZE // patch_size)
     pretrained_model = cfg.TIMESFORMER.PRETRAINED_MODEL
-    # if pretrained_model == "true" :
-    print("set pretrained vit")
-    load_pretrained(vit, num_classes=vit.num_classes, in_chans=kwargs.get('in_chans', 3),
+    if pretrained_model == " " :
+        print("set pretrained vit")
+        load_pretrained(vit, num_classes=vit.num_classes, in_chans=kwargs.get('in_chans', 3),
                         filter_fn=_conv_filter, img_size=cfg.DATA.TRAIN_CROP_SIZE, num_patches=vit.num_patches,
                         attention_type=vit.attention_type, pretrained_model=pretrained_model)
         
-    vit.reset_classifier(cfg.MODEL.NUM_CLASSES)
+    # vit.reset_classifier(cfg.MODEL.NUM_CLASSES)
     print("head.weight : \n", vit.get_classifier().weight.data)  
         
     if no_head:

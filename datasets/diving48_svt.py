@@ -1,17 +1,20 @@
-
+# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved.
+import glob
 import os
 import random
 import warnings
-
+from PIL import Image
 import torch
 import torch.utils.data
+import torchvision
+import kornia
 
+from datasets.transform import resize
 from datasets.data_utils import get_random_sampling_rate, tensor_normalize, spatial_sampling, pack_pathway_output
 from datasets.decoder import decode
 from datasets.video_container import get_video_container
 from datasets.transform import VideoDataAugmentationDINO
 from einops import rearrange
-
 
 
 class Diving48(torch.utils.data.Dataset):
@@ -25,7 +28,7 @@ class Diving48(torch.utils.data.Dataset):
     bottom crop if the height is larger than the width.
     """
 
-    def __init__(self, cfg, mode, num_retries=10):
+    def __init__(self, cfg, mode, num_retries=10, get_flow=False):
         """
         Construct the Kinetics video loader with a given csv file. The format of
         the csv file is:
@@ -52,6 +55,9 @@ class Diving48(torch.utils.data.Dataset):
         ], "Split '{}' not supported for Kinetics".format(mode)
         self.mode = mode
         self.cfg = cfg
+        if get_flow:
+            assert mode == "train", "invalid: flow only for train mode"
+        self.get_flow = get_flow
 
         self._video_meta = {}
         self._num_retries = num_retries
@@ -63,10 +69,10 @@ class Diving48(torch.utils.data.Dataset):
             self._num_clips = 1
         elif self.mode in ["test"]:
             self._num_clips = (
-                cfg.TEST.NUM_ENSEMBLE_VIEWS * cfg.TEST.NUM_SPATIAL_CROPS
+                    cfg.TEST.NUM_ENSEMBLE_VIEWS * cfg.TEST.NUM_SPATIAL_CROPS
             )
 
-        print("Constructing Diving48 {}...".format(mode))
+        print("Constructing Kinetics {}...".format(mode))
         self._construct_loader()
 
     def _construct_loader(self):
@@ -86,8 +92,8 @@ class Diving48(torch.utils.data.Dataset):
         with open(path_to_file, "r") as f:
             for clip_idx, path_label in enumerate(f.read().splitlines()):
                 assert (
-                    len(path_label.split(self.cfg.DATA.PATH_LABEL_SEPARATOR))
-                    == 2
+                        len(path_label.split(self.cfg.DATA.PATH_LABEL_SEPARATOR))
+                        == 2
                 )
                 path, label = path_label.split(
                     self.cfg.DATA.PATH_LABEL_SEPARATOR
@@ -100,12 +106,12 @@ class Diving48(torch.utils.data.Dataset):
                     self._spatial_temporal_idx.append(idx)
                     self._video_meta[clip_idx * self._num_clips + idx] = {}
         assert (
-            len(self._path_to_videos) > 0
+                len(self._path_to_videos) > 0
         ), "Failed to load Kinetics split {} from {}".format(
             self._split_idx, path_to_file
         )
         print(
-            "Constructing Diving48 dataloader (size: {}) from {}".format(
+            "Constructing kinetics dataloader (size: {}) from {}".format(
                 len(self._path_to_videos), path_to_file
             )
         )
@@ -130,7 +136,7 @@ class Diving48(torch.utils.data.Dataset):
         if isinstance(index, tuple):
             index, short_cycle_idx = index
 
-        if self.mode in ["train"]:
+        if self.mode in ["train", "val"]:
             # -1 indicates random sampling.
             temporal_sample_index = -1
             spatial_sample_index = -1
@@ -154,18 +160,27 @@ class Diving48(torch.utils.data.Dataset):
                         / self.cfg.MULTIGRID.DEFAULT_S
                     )
                 )
-        elif self.mode in ["val", "test"]:
-            temporal_sample_index = (self._spatial_temporal_idx[index] // self.cfg.TEST.NUM_SPATIAL_CROPS)
+        elif self.mode in ["test"]:
+            temporal_sample_index = (
+                    self._spatial_temporal_idx[index]
+                    // self.cfg.TEST.NUM_SPATIAL_CROPS
+            )
             # spatial_sample_index is in [0, 1, 2]. Corresponding to left,
             # center, or right if width is larger than height, and top, middle,
             # or bottom if height is larger than width.
             spatial_sample_index = (
-                (self._spatial_temporal_idx[index] % self.cfg.TEST.NUM_SPATIAL_CROPS)
-                if self.cfg.TEST.NUM_SPATIAL_CROPS > 1 else 1
+                (
+                        self._spatial_temporal_idx[index]
+                        % self.cfg.TEST.NUM_SPATIAL_CROPS
+                )
+                if self.cfg.TEST.NUM_SPATIAL_CROPS > 1
+                else 1
             )
             min_scale, max_scale, crop_size = (
-                [self.cfg.DATA.TEST_CROP_SIZE] * 3 if self.cfg.TEST.NUM_SPATIAL_CROPS > 1
-                else [self.cfg.DATA.TRAIN_JITTER_SCALES[0]] * 2 + [self.cfg.DATA.TEST_CROP_SIZE]
+                [self.cfg.DATA.TEST_CROP_SIZE] * 3
+                if self.cfg.TEST.NUM_SPATIAL_CROPS > 1
+                else [self.cfg.DATA.TRAIN_JITTER_SCALES[0]] * 2
+                     + [self.cfg.DATA.TEST_CROP_SIZE]
             )
             # The testing is deterministic and no jitter should be performed.
             # min_scale, max_scale, and crop_size are expect to be the same.
@@ -174,14 +189,12 @@ class Diving48(torch.utils.data.Dataset):
             raise NotImplementedError(
                 "Does not support {} mode".format(self.mode)
             )
-            
         sampling_rate = get_random_sampling_rate(
             self.cfg.MULTIGRID.LONG_CYCLE_SAMPLING_RATE,
             self.cfg.DATA.SAMPLING_RATE,
         )
-        
         # Try to decode and sample a clip from a video. If the video can not be
-        # decoded, repeatedly find a random video replacement that can be decoded.
+        # decoded, repeatly find a random video replacement that can be decoded.
         for i_try in range(self._num_retries):
             video_container = None
             try:
@@ -203,7 +216,7 @@ class Diving48(torch.utils.data.Dataset):
                         index, self._path_to_videos[index], i_try
                     )
                 )
-                if self.mode not in ["val", "test"] and i_try > self._num_retries // 2:
+                if self.mode not in ["test"] and i_try > self._num_retries // 2:
                     # let's try another one
                     index = random.randint(0, len(self._path_to_videos) - 1)
                 continue
@@ -219,6 +232,9 @@ class Diving48(torch.utils.data.Dataset):
                 target_fps=self.cfg.DATA.TARGET_FPS,
                 backend=self.cfg.DATA.DECODING_BACKEND,
                 max_spatial_scale=min_scale,
+                temporal_aug=self.mode == "train" and not self.cfg.DATA.NO_RGB_AUG,
+                two_token=self.cfg.MODEL.TWO_TOKEN,
+                rand_fr=self.cfg.DATA.RAND_FR
             )
 
             # If decoding failed (wrong format, video is too short, and etc),
@@ -236,36 +252,80 @@ class Diving48(torch.utils.data.Dataset):
 
             label = self._labels[index]
 
-            # Perform color normalization.
-            frames = tensor_normalize(
-                frames, self.cfg.DATA.MEAN, self.cfg.DATA.STD
-            )
-            frames = frames.permute(3, 0, 1, 2)
+            if self.mode in ["test", "val"] or self.cfg.DATA.NO_RGB_AUG:
+                # Perform color normalization.
+                frames = tensor_normalize(
+                    frames, self.cfg.DATA.MEAN, self.cfg.DATA.STD
+                )
 
-            # Perform data augmentation.
-            frames = spatial_sampling(
-                frames,
-                spatial_idx=spatial_sample_index,
-                min_scale=min_scale,
-                max_scale=max_scale,
-                crop_size=crop_size,
-                random_horizontal_flip=self.cfg.DATA.RANDOM_FLIP,
-                inverse_uniform_sampling=self.cfg.DATA.INV_UNIFORM_SAMPLE,
-            )
+                # T H W C -> C T H W.
+                frames = frames.permute(3, 0, 1, 2)
 
-            # if not self.cfg.MODEL.ARCH in ['vit']:
-            #     frames = pack_pathway_output(self.cfg, frames)
-            # else:
-            # Perform temporal sampling from the fast pathway.
-            # frames = [torch.index_select(
-            #     x,
-            #     1,
-            #     torch.linspace(
-            #         0, x.shape[1] - 1, self.cfg.DATA.NUM_FRAMES
-            #     ).long(),
-            # ) for x in frames]
+                # Perform data augmentation.
+                frames = spatial_sampling(
+                    frames,
+                    spatial_idx=spatial_sample_index,
+                    min_scale=min_scale,
+                    max_scale=max_scale,
+                    crop_size=crop_size,
+                    random_horizontal_flip=self.cfg.DATA.RANDOM_FLIP,
+                    inverse_uniform_sampling=self.cfg.DATA.INV_UNIFORM_SAMPLE,
+                )
 
-            return frames, label, index, {}
+                if not self.cfg.MODEL.ARCH in ['vit']:
+                    frames = pack_pathway_output(self.cfg, frames)
+                else:
+                    # Perform temporal sampling from the fast pathway.
+                    frames = torch.index_select(
+                        frames,
+                        1,
+                        torch.linspace(
+                            0, frames.shape[1] - 1, self.cfg.DATA.NUM_FRAMES
+
+                        ).long(),
+                    )
+
+            else:
+                # T H W C -> T C H W.
+                frames = [rearrange(x, "t h w c -> t c h w") for x in frames]
+
+                # Perform data augmentation.
+                augmentation = VideoDataAugmentationDINO()
+                frames = augmentation(frames, from_list=True, no_aug=self.cfg.DATA.NO_SPATIAL,
+                                      two_token=self.cfg.MODEL.TWO_TOKEN)
+
+                # T C H W -> C T H W.
+                frames = [rearrange(x, "t c h w -> c t h w") for x in frames]
+
+                # Perform temporal sampling from the fast pathway.
+                frames = [torch.index_select(
+                    x,
+                    1,
+                    torch.linspace(
+                        0, x.shape[1] - 1, x.shape[1] if self.cfg.DATA.RAND_FR else self.cfg.DATA.NUM_FRAMES
+
+                    ).long(),
+                ) for x in frames]
+
+            meta_data = {}
+            if self.get_flow:
+                assert self.mode == "train", "flow only for train"
+                try:
+                    flow_path = self._path_to_videos[index].replace("train_d256", "train_flow")[:-4]
+                    flow_tensor = self.get_flow_from_folder(flow_path)
+                    flow_tensor = kornia.filters.sobel(flow_tensor)
+                    if self.cfg.DATA.NO_FLOW_AUG:
+                        flow_tensor = resize(flow_tensor, size=self.cfg.DATA.CROP_SIZE, mode="bicubic")
+                        flow_tensor = [x for x in flow_tensor]
+                    else:
+                        flow_tensor = augmentation(flow_tensor)
+                        flow_tensor = [rearrange(x, "t c h w -> c t h w") for x in flow_tensor]
+                    meta_data["flow"] = flow_tensor
+                except Exception as e:
+                    print(e)
+                    continue
+            return frames, label, index, meta_data
+
         else:
             raise RuntimeError(
                 "Failed to fetch video after {} retries.".format(
@@ -279,3 +339,46 @@ class Diving48(torch.utils.data.Dataset):
             (int): the number of videos in the dataset.
         """
         return len(self._path_to_videos)
+
+    @staticmethod
+    def get_flow_from_folder(dir_path):
+        flow_image_list = sorted(glob.glob(f"{dir_path}/*.jpg"))
+        flow_image_list = [Image.open(im_path) for im_path in flow_image_list]
+        flow_image_list = [torchvision.transforms.functional.to_tensor(im_path) for im_path in flow_image_list]
+        return torch.stack(flow_image_list, dim=0)
+
+
+if __name__ == '__main__':
+
+    # import torch
+    # from timesformer.datasets import Kinetics
+    from utils.parser import parse_args, load_config
+    from tqdm import tqdm
+
+    args = parse_args()
+    args.cfg_file = "/home/kanchanaranasinghe/repo/timesformer/configs/Kinetics/TimeSformer_divST_8x32_224.yaml"
+    config = load_config(args)
+    config.DATA.PATH_TO_DATA_DIR = "/home/kanchanaranasinghe/data/kinetics400/new_annotations"
+    # config.DATA.PATH_TO_DATA_DIR = "/home/kanchanaranasinghe/data/kinetics400/k400-mini"
+    config.DATA.PATH_PREFIX = "/home/kanchanaranasinghe/data/kinetics400"
+    # dataset = Kinetics(cfg=config, mode="val", num_retries=10)
+    dataset = Kinetics(cfg=config, mode="train", num_retries=10, get_flow=True)
+    print(f"Loaded train dataset of length: {len(dataset)}")
+    dataloader = torch.utils.data.DataLoader(dataset=dataset, batch_size=4)
+    for idx, i in enumerate(dataloader):
+        print([x.shape for x in i[0]], i[1:3], [x.shape for x in i[3]['flow']])
+        break
+
+    do_vis = False
+    if do_vis:
+        from PIL import Image
+        from transform import undo_normalize
+
+        vis_path = "/home/kanchanaranasinghe/data/kinetics400/vis/spatial_aug"
+
+        for aug_idx in range(len(i[0])):
+            temp = i[0][aug_idx][3].permute(1, 2, 3, 0)
+            temp = undo_normalize(temp, mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+            for idx in range(temp.shape[0]):
+                im = Image.fromarray(temp[idx].numpy())
+                im.resize((224, 224)).save(f"{vis_path}/aug_{aug_idx}_fr_{idx:02d}.jpg")

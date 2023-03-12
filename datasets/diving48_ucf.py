@@ -1,4 +1,3 @@
-
 import os
 import random
 import warnings
@@ -13,10 +12,9 @@ from datasets.transform import VideoDataAugmentationDINO
 from einops import rearrange
 
 
-
-class Diving48(torch.utils.data.Dataset):
+class Diving48_dfdf(torch.utils.data.Dataset):
     """
-    Kinetics video loader. Construct the Kinetics video loader, then sample
+    UCF101 video loader. Construct the UCF101 video loader, then sample
     clips from the videos. For training and validation, a single clip is
     randomly sampled from every video with random cropping, scaling, and
     flipping. For testing, multiple clips are uniformaly sampled from every
@@ -27,7 +25,7 @@ class Diving48(torch.utils.data.Dataset):
 
     def __init__(self, cfg, mode, num_retries=10):
         """
-        Construct the Kinetics video loader with a given csv file. The format of
+        Construct the UCF101 video loader with a given csv file. The format of
         the csv file is:
         ```
         path_to_video_1 label_1
@@ -38,32 +36,27 @@ class Diving48(torch.utils.data.Dataset):
         Args:
             cfg (CfgNode): configs.
             mode (string): Options includes `train`, `val`, or `test` mode.
-                For the train and val mode, the data loader will take data
-                from the train or val set, and sample one clip per video.
-                For the test mode, the data loader will take data from test set,
+                For the train mode, the data loader will take data from the
+                train set, and sample one clip per video. For the val and
+                test mode, the data loader will take data from relevent set,
                 and sample multiple clips per video.
             num_retries (int): number of retries.
         """
         # Only support train, val, and test mode.
-        assert mode in [
-            "train",
-            "val",
-            "test",
-        ], "Split '{}' not supported for Kinetics".format(mode)
+        # assert mode in ["train", "val", "test"], "Split '{}' not supported for KTH".format(mode)
         self.mode = mode
         self.cfg = cfg
 
         self._video_meta = {}
         self._num_retries = num_retries
-        # For training or validation mode, one single clip is sampled from every
-        # video. For testing, NUM_ENSEMBLE_VIEWS clips are sampled from every
-        # video. For every clip, NUM_SPATIAL_CROPS is cropped spatially from
-        # the frames.
-        if self.mode in ["train", "val"]:
+        self._split_idx = mode
+        # For training mode, one single clip is sampled from every video. For validation or testing, NUM_ENSEMBLE_VIEWS
+        # clips are sampled from every video. For every clip, NUM_SPATIAL_CROPS is cropped spatially from the frames.
+        if self.mode in ["train"]:
             self._num_clips = 1
-        elif self.mode in ["test"]:
+        elif self.mode in ["val", "test", "fe"]:
             self._num_clips = (
-                cfg.TEST.NUM_ENSEMBLE_VIEWS * cfg.TEST.NUM_SPATIAL_CROPS
+                    cfg.TEST.NUM_ENSEMBLE_VIEWS * cfg.TEST.NUM_SPATIAL_CROPS
             )
 
         print("Constructing Diving48 {}...".format(mode))
@@ -74,7 +67,9 @@ class Diving48(torch.utils.data.Dataset):
         Construct the video loader.
         """
         path_to_file = os.path.join(
-            self.cfg.DATA.PATH_TO_DATA_DIR, "diving48_{}_videos.txt".format(self.mode)
+            # self.cfg.DATA.PATH_TO_DATA_DIR, "ucf101_{}_split_1_videos_simple.txt".format(self.mode)
+            "/data/ahngeo11/svt/datasets/annotations/diving48/diving48_{}_videos.txt".format(self.mode)
+            
         )
         assert os.path.exists(path_to_file), "{} dir not found".format(
             path_to_file
@@ -84,10 +79,11 @@ class Diving48(torch.utils.data.Dataset):
         self._labels = []
         self._spatial_temporal_idx = []
         with open(path_to_file, "r") as f:
+            print(self.cfg.DATA.PATH_LABEL_SEPARATOR)
             for clip_idx, path_label in enumerate(f.read().splitlines()):
                 assert (
-                    len(path_label.split(self.cfg.DATA.PATH_LABEL_SEPARATOR))
-                    == 2
+                        len(path_label.split(self.cfg.DATA.PATH_LABEL_SEPARATOR))
+                        == 2
                 )
                 path, label = path_label.split(
                     self.cfg.DATA.PATH_LABEL_SEPARATOR
@@ -99,16 +95,8 @@ class Diving48(torch.utils.data.Dataset):
                     self._labels.append(int(label))
                     self._spatial_temporal_idx.append(idx)
                     self._video_meta[clip_idx * self._num_clips + idx] = {}
-        assert (
-            len(self._path_to_videos) > 0
-        ), "Failed to load Kinetics split {} from {}".format(
-            self._split_idx, path_to_file
-        )
-        print(
-            "Constructing Diving48 dataloader (size: {}) from {}".format(
-                len(self._path_to_videos), path_to_file
-            )
-        )
+        assert (len(self._path_to_videos) > 0), f"Failed to load Diving48 split {self._split_idx} from {path_to_file}"
+        print(f"Constructing Diving48 dataloader (size: {len(self._path_to_videos)}) from {path_to_file}")
 
     def __getitem__(self, index):
         """
@@ -130,6 +118,9 @@ class Diving48(torch.utils.data.Dataset):
         if isinstance(index, tuple):
             index, short_cycle_idx = index
 
+        if self.mode == "fe" :
+            self.mode = "val"
+        
         if self.mode in ["train"]:
             # -1 indicates random sampling.
             temporal_sample_index = -1
@@ -174,12 +165,10 @@ class Diving48(torch.utils.data.Dataset):
             raise NotImplementedError(
                 "Does not support {} mode".format(self.mode)
             )
-            
         sampling_rate = get_random_sampling_rate(
             self.cfg.MULTIGRID.LONG_CYCLE_SAMPLING_RATE,
             self.cfg.DATA.SAMPLING_RATE,
         )
-        
         # Try to decode and sample a clip from a video. If the video can not be
         # decoded, repeatedly find a random video replacement that can be decoded.
         for i_try in range(self._num_retries):
@@ -239,7 +228,7 @@ class Diving48(torch.utils.data.Dataset):
             # Perform color normalization.
             frames = tensor_normalize(
                 frames, self.cfg.DATA.MEAN, self.cfg.DATA.STD
-            )
+            )    
             frames = frames.permute(3, 0, 1, 2)
 
             # Perform data augmentation.
@@ -256,14 +245,14 @@ class Diving48(torch.utils.data.Dataset):
             # if not self.cfg.MODEL.ARCH in ['vit']:
             #     frames = pack_pathway_output(self.cfg, frames)
             # else:
-            # Perform temporal sampling from the fast pathway.
-            # frames = [torch.index_select(
-            #     x,
-            #     1,
-            #     torch.linspace(
-            #         0, x.shape[1] - 1, self.cfg.DATA.NUM_FRAMES
-            #     ).long(),
-            # ) for x in frames]
+            # # Perform temporal sampling from the fast pathway.
+            #     frames = [torch.index_select(
+            #         x,
+            #         1,
+            #         torch.linspace(
+            #             0, x.shape[1] - 1, self.cfg.DATA.NUM_FRAMES
+            #         ).long(),
+            #     ) for x in frames]
 
             return frames, label, index, {}
         else:
@@ -279,3 +268,30 @@ class Diving48(torch.utils.data.Dataset):
             (int): the number of videos in the dataset.
         """
         return len(self._path_to_videos)
+
+
+if __name__ == '__main__':
+
+    from utils.parser import parse_args, load_config
+    from tqdm import tqdm
+
+    args = parse_args()
+    args.cfg_file = "models/configs/Kinetics/TimeSformer_divST_8x32_224.yaml"
+    config = load_config(args)
+    config.DATA.PATH_TO_DATA_DIR = "/home/kanchanaranasinghe/repo/mmaction2/data/ucf101/splits"
+    config.DATA.PATH_PREFIX = "/home/kanchanaranasinghe/repo/mmaction2/data/ucf101/videos"
+    dataset = UCF101(cfg=config, mode="train", num_retries=10)
+    dataloader = torch.utils.data.DataLoader(dataset=dataset, batch_size=4)
+    print(f"Loaded train dataset of length: {len(dataset)}")
+    for idx, i in enumerate(dataloader):
+        print(idx, i[0].shape, i[1:])
+        if idx > 2:
+            break
+
+    test_dataset = UCF101(cfg=config, mode="val", num_retries=10)
+    test_dataloader = torch.utils.data.DataLoader(dataset=test_dataset, batch_size=4)
+    print(f"Loaded test dataset of length: {len(test_dataset)}")
+    for idx, i in enumerate(test_dataloader):
+        print(idx, i[0].shape, i[1:])
+        if idx > 2:
+            break

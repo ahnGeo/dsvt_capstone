@@ -101,15 +101,29 @@ def load_pretrained(model, cfg=None, num_classes=1000, in_chans=3, filter_fn=Non
         _logger.warning("Pretrained model URL is invalid, using random initialization.")
         return
 
-    if pretrained_model == "true":
-        print("load pretrained weights")
-        state_dict = model_zoo.load_url(cfg['url'], progress=False, map_location='cpu')
-    else:
+    if cfg['url'] == '':
         try:
+            print("load pretrained weights")
             state_dict = load_state_dict(pretrained_model)['model']
         except:
             state_dict = load_state_dict(pretrained_model)
+    else :        
+        print("load pretrained weights")
+        state_dict = model_zoo.load_url(cfg['url'], progress=False, map_location='cpu')
+        
+    # if pretrained_model == "true":
+    #     print("load pretrained weights")
+    #     state_dict = model_zoo.load_url(cfg['url'], progress=False, map_location='cpu')
+    # else:
+    #     try:
+    #         state_dict = load_state_dict(pretrained_model)['model']
+    #     except:
+    #         state_dict = load_state_dict(pretrained_model)
 
+    if "deit" in cfg['url'] :
+        state_dict = state_dict['model']
+        
+    
     if filter_fn is not None:
         state_dict = filter_fn(state_dict)
 
