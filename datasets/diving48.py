@@ -219,6 +219,7 @@ class Diving48(torch.utils.data.Dataset):
                 target_fps=self.cfg.DATA.TARGET_FPS,
                 backend=self.cfg.DATA.DECODING_BACKEND,
                 max_spatial_scale=min_scale,
+                mode=self.mode
             )
 
             # If decoding failed (wrong format, video is too short, and etc),
