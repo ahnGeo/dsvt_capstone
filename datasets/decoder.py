@@ -33,7 +33,7 @@ def temporal_sampling(frames, start_idx, end_idx, num_samples, mode):
     
     elif mode == "test" :    
         #! fixed uniform sampling
-        selected_index = torch.linspace(start_idx, end_idx, num_samples)
+        index = torch.linspace(start_idx, end_idx, num_samples)
         selected_index = torch.clamp(index, 0, frames.shape[0] - 1).long()
     frames = torch.index_select(frames, 0, selected_index)
     return frames
