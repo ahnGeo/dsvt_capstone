@@ -7,7 +7,7 @@ import torch
 import torchvision.io as io
 
 
-def temporal_sampling(frames, start_idx, end_idx, num_samples):
+def temporal_sampling(frames, start_idx, end_idx, num_samples, mode):
     """
     Given the start and end frame index, sample num_samples frames between
     the start and end with equal interval.
