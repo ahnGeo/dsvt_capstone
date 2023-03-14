@@ -23,7 +23,7 @@ from torch import nn
 from datasets.hmdb51 import HMDB51
 from datasets.ucf101 import UCF101
 from datasets.kth import KTH
-from datasets.diving48 import Diving48
+from datasets.diving48_ucf import Diving48
 from models import get_vit_base_patch16_224
 from utils import utils
 from utils.parser import load_config
