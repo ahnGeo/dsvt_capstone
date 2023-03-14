@@ -40,6 +40,11 @@ def eval_linear(args):
     config = load_config(args)
     # config.DATA.PATH_TO_DATA_DIR = f"{os.path.expanduser('~')}/repo/mmaction2/data/{args.dataset}/splits"
     # config.DATA.PATH_PREFIX = f"{os.path.expanduser('~')}/repo/mmaction2/data/{args.dataset}/videos"
+    
+    import numpy as np
+    np.random.seed(config.RNG_SEED)
+    torch.manual_seed(config.RNG_SEED)
+    
     config.TEST.NUM_SPATIAL_CROPS = 1
     if args.dataset == "ucf101":
         dataset_train = UCF101(cfg=config, mode="train", num_retries=10)
@@ -78,6 +83,7 @@ def eval_linear(args):
         sampler=sampler,
         batch_size=args.batch_size_per_gpu,
         num_workers=args.num_workers,
+        shuffle=False,
         pin_memory=True,
     )
     val_loader = torch.utils.data.DataLoader(
@@ -395,6 +401,7 @@ if __name__ == '__main__':
     import time
     
     start = time.time()
+    
     
     best_acc = eval_linear(args)
 
