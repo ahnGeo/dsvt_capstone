@@ -608,7 +608,7 @@ def get_vit_base_patch16_224(cfg, no_head=False, **kwargs):
     vit.default_cfg = default_cfgs['deit_base_patch16_224_i-1k']
     vit.num_patches = (cfg.DATA.TRAIN_CROP_SIZE // patch_size) * (cfg.DATA.TRAIN_CROP_SIZE // patch_size)
     pretrained_model = cfg.TIMESFORMER.PRETRAINED_MODEL
-    if pretrained_model == " " :
+    if pretrained_model == "" :
         print("set pretrained vit")
         load_pretrained(vit, num_classes=vit.num_classes, in_chans=kwargs.get('in_chans', 3),
                         filter_fn=_conv_filter, img_size=cfg.DATA.TRAIN_CROP_SIZE, num_patches=vit.num_patches,

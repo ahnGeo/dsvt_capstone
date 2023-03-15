@@ -21,7 +21,7 @@ def temporal_sampling(frames, start_idx, end_idx, num_samples, mode):
         frames (tersor): a tensor of temporal sampled video frames, dimension is
             `num clip frames` x `channel` x `height` x `width`.
     """
-    if mode in ["train", "val"] :
+    if mode in ["train"] :
         #! select randomly from each split of frames indices == random uniform sampling
         video_len = end_idx + 1     # end_idx = video_len - 1
         index = torch.LongTensor([i for i in range(video_len)])
@@ -31,7 +31,7 @@ def temporal_sampling(frames, start_idx, end_idx, num_samples, mode):
             selected_index.append(random.randint(index_split[0], index_split[-1]))
         selected_index = torch.LongTensor(selected_index)
     
-    elif mode == "test" :    
+    elif mode in ["val", "test"] :    
         #! fixed uniform sampling
         index = torch.linspace(start_idx, end_idx, num_samples)
         selected_index = torch.clamp(index, 0, frames.shape[0] - 1).long()
@@ -455,4 +455,5 @@ def decode(
 
     else:
         frames = temporal_sampling(frames, start_idx, end_idx, num_frames, mode)  # frames.shape = (T, H, W, C)
+        
     return frames

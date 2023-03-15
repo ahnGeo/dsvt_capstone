@@ -75,7 +75,7 @@ def eval_linear(args):
     else:
         raise NotImplementedError(f"invalid dataset: {args.dataset}")
 
-    print(config)
+    # print(config)
     
     sampler = torch.utils.data.distributed.DistributedSampler(dataset_train)
     train_loader = torch.utils.data.DataLoader(
@@ -120,16 +120,19 @@ def eval_linear(args):
             raise Exception(f"invalid model: {args.arch}")
 
     if "pth" in args.pretrained_weights or "pyth" in args.pretrained_weights :  #* not any args, initialize with dino weights
-        # ckpt = torch.load(args.pretrained_weights)['model_state']
-        ckpt = torch.load(args.pretrained_weights)
-        #  select_ckpt = 'motion_teacher' if args.use_flow else "teacher"
-        if "teacher" in ckpt:
-            ckpt = ckpt["teacher"]
-        if "vitb" in args.pretrained_weights :
-            renamed_checkpoint = {x[len("backbone."):]: y for x, y in ckpt.items() if x.startswith("backbone.")}
-        elif "TimeSformer" in args.pretrained_weights :
-            renamed_checkpoint = {x[len("model."):]: y for x, y in ckpt.items() if x.startswith("model.") and not "head" in x}
+        if "pth.tar" in args.pretrained_weights :   #* local trained weights
+            renamed_checkpoint = torch.load(args.pretrained_weights)['state_dict']
+        else :    
+            ckpt = torch.load(args.pretrained_weights)
+            #  select_ckpt = 'motion_teacher' if args.use_flow else "teacher"
+            if "teacher" in ckpt:
+                ckpt = ckpt["teacher"]
+            if "vitb" in args.pretrained_weights :   #* svt k400 pretrained weights from repo
+                renamed_checkpoint = {x[len("backbone."):]: y for x, y in ckpt.items() if x.startswith("backbone.")}
+            elif "TimeSformer" in args.pretrained_weights :
+                renamed_checkpoint = {x[len("model."):]: y for x, y in ckpt.items() if x.startswith("model.") and not "head" in x}
         msg = model.load_state_dict(renamed_checkpoint, strict=False)
+        print("load pretrained model on eval_finetune.py")
         print(f"Loaded model with msg: {msg}")
         
     model.cuda()
