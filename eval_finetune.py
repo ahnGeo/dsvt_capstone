@@ -26,7 +26,7 @@ from utils import utils
 from utils.meters import TestMeter
 from utils.parser import load_config
 # from torchsummary import summary as summary
-
+import numpy as np
 
 def eval_linear(args):
     utils.init_distributed_mode(args)
@@ -41,7 +41,6 @@ def eval_linear(args):
     # config.DATA.PATH_TO_DATA_DIR = f"{os.path.expanduser('~')}/repo/mmaction2/data/{args.dataset}/splits"
     # config.DATA.PATH_PREFIX = f"{os.path.expanduser('~')}/repo/mmaction2/data/{args.dataset}/videos"
     
-    import numpy as np
     np.random.seed(config.RNG_SEED)
     torch.manual_seed(config.RNG_SEED)
     
@@ -127,17 +126,21 @@ def eval_linear(args):
             #  select_ckpt = 'motion_teacher' if args.use_flow else "teacher"
             if "teacher" in ckpt:
                 ckpt = ckpt["teacher"]
-            if "vitb" in args.pretrained_weights :   #* svt k400 pretrained weights from repo
+                
+            if "vitb" in args.pretrained_weights or "our" in args.pretrained_weights :   #* svt k400 pretrained weights from repo
                 renamed_checkpoint = {x[len("backbone."):]: y for x, y in ckpt.items() if x.startswith("backbone.")}
             elif "TimeSformer" in args.pretrained_weights :
                 renamed_checkpoint = {x[len("model."):]: y for x, y in ckpt.items() if x.startswith("model.") and not "head" in x}
+            else :
+                renamed_checkpoint = ckpt
+                
         msg = model.load_state_dict(renamed_checkpoint, strict=False)
         print("load pretrained model on eval_finetune.py")
         print(f"Loaded model with msg: {msg}")
         
     model.cuda()
     print(f"Model {args.arch} {args.patch_size}x{args.patch_size} built.")
-    
+
 
     params_groups = utils.get_params_groups(model)
     

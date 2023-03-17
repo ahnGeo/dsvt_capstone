@@ -7,7 +7,7 @@ import torch
 import torchvision.io as io
 
 
-def temporal_sampling(frames, start_idx, end_idx, num_samples, mode):
+def temporal_sampling(frames, start_idx, end_idx, num_samples):
     """
     Given the start and end frame index, sample num_samples frames between
     the start and end with equal interval.
@@ -21,21 +21,9 @@ def temporal_sampling(frames, start_idx, end_idx, num_samples, mode):
         frames (tersor): a tensor of temporal sampled video frames, dimension is
             `num clip frames` x `channel` x `height` x `width`.
     """
-    if mode in ["train"] :
-        #! select randomly from each split of frames indices == random uniform sampling
-        video_len = end_idx + 1     # end_idx = video_len - 1
-        index = torch.LongTensor([i for i in range(video_len)])
-        index = torch.tensor_split(index, num_samples)
-        selected_index = []
-        for index_split in index :
-            selected_index.append(random.randint(index_split[0], index_split[-1]))
-        selected_index = torch.LongTensor(selected_index)
-    
-    elif mode in ["val", "test"] :    
-        #! fixed uniform sampling
-        index = torch.linspace(start_idx, end_idx, num_samples)
-        selected_index = torch.clamp(index, 0, frames.shape[0] - 1).long()
-    frames = torch.index_select(frames, 0, selected_index)
+    index = torch.linspace(start_idx, end_idx, num_samples)
+    index = torch.clamp(index, 0, frames.shape[0] - 1).long()
+    frames = torch.index_select(frames, 0, index)
     return frames
 
 
@@ -59,17 +47,14 @@ def get_start_end_idx(video_size, clip_size, clip_idx, num_clips):
         start_idx (int): the start frame index.
         end_idx (int): the end frame index.
     """
-    # delta = max(video_size - clip_size, 0)
-    # if clip_idx == -1:
-    #     # Random temporal sampling.
-    #     start_idx = random.uniform(0, delta)
-    # else:
-    #     # Uniformly sample the clip with the given index.
-    #     start_idx = delta * clip_idx / num_clips
-    # end_idx = start_idx + clip_size - 1
-    
-    start_idx = 0
-    end_idx = video_size - 1  #! set to video len
+    delta = max(video_size - clip_size, 0)
+    if clip_idx == -1:
+        # Random temporal sampling.
+        start_idx = random.uniform(0, delta)
+    else:
+        # Uniformly sample the clip with the given index.
+        start_idx = delta * clip_idx / num_clips
+    end_idx = start_idx + clip_size - 1
     return start_idx, end_idx
 
 
@@ -100,9 +85,7 @@ def pyav_decode_stream(
     frames = {}
     buffer_count = 0
     max_pts = 0
-    decode_len = 0
     for frame in container.decode(**stream_name):
-        decode_len += 1
         max_pts = max(max_pts, frame.pts)
         if frame.pts < start_pts:
             continue
@@ -275,8 +258,8 @@ def pyav_decode(
         # Perform selective decoding.
         decode_all_video = False
         start_idx, end_idx = get_start_end_idx(
-            frames_length,   #* original frames len
-            sampling_rate * num_frames / target_fps * fps,    #* clip len
+            frames_length,
+            sampling_rate * num_frames / target_fps * fps,
             clip_idx,
             num_clips,
         )
@@ -333,8 +316,7 @@ def decode(
     frames_length=None,
     temporal_aug=False,
     two_token=False,
-    rand_fr=False,
-    mode=None
+    rand_fr=False
 ):
     """
     Decode the video and perform temporal sampling.
@@ -454,6 +436,5 @@ def decode(
         frames = [global_1, global_2, *local_samples]
 
     else:
-        frames = temporal_sampling(frames, start_idx, end_idx, num_frames, mode)  # frames.shape = (T, H, W, C)
-        
+        frames = temporal_sampling(frames, start_idx, end_idx, num_frames)  # frames.shape = (T, H, W, C)
     return frames
