@@ -29,6 +29,12 @@ from utils.parser import load_config
 import numpy as np
 
 def eval_linear(args):
+
+    config = load_config(args)
+    
+    torch.manual_seed(config.RNG_SEED)
+    np.random.seed(config.RNG_SEED)
+    
     utils.init_distributed_mode(args)
     print("git:\n  {}\n".format(utils.get_sha()))
     print("\n".join("%s: %s" % (k, str(v)) for k, v in sorted(dict(vars(args)).items())))
@@ -37,13 +43,8 @@ def eval_linear(args):
     json.dump(vars(args), open(f"{args.output_dir}/config.json", "w"), indent=4)
 
     # ============ preparing data ... ============
-    config = load_config(args)
     # config.DATA.PATH_TO_DATA_DIR = f"{os.path.expanduser('~')}/repo/mmaction2/data/{args.dataset}/splits"
     # config.DATA.PATH_PREFIX = f"{os.path.expanduser('~')}/repo/mmaction2/data/{args.dataset}/videos"
-    
-    np.random.seed(config.RNG_SEED)
-    torch.manual_seed(config.RNG_SEED)
-    
     config.TEST.NUM_SPATIAL_CROPS = 1
     if args.dataset == "ucf101":
         dataset_train = UCF101(cfg=config, mode="train", num_retries=10)
@@ -74,15 +75,12 @@ def eval_linear(args):
     else:
         raise NotImplementedError(f"invalid dataset: {args.dataset}")
 
-    # print(config)
-    
     sampler = torch.utils.data.distributed.DistributedSampler(dataset_train)
     train_loader = torch.utils.data.DataLoader(
         dataset_train,
         sampler=sampler,
         batch_size=args.batch_size_per_gpu,
         num_workers=args.num_workers,
-        shuffle=False,
         pin_memory=True,
     )
     val_loader = torch.utils.data.DataLoader(
@@ -110,7 +108,7 @@ def eval_linear(args):
         model_embed_dim = 2 * model.embed_dim
     else:
         if args.arch == "vit_base":
-            model = get_vit_base_patch16_224(cfg=config, no_head=False)     #^ head = linear classifier
+            model = get_vit_base_patch16_224(cfg=config, no_head=False, pretrained=args.img_pretrained)     #^ head = linear classifier
             model_embed_dim = model.embed_dim
         elif args.arch == "swin":
             model = SwinTransformer3D(depths=[2, 2, 18, 2], embed_dim=128, num_heads=[4, 8, 16, 32])
@@ -119,28 +117,26 @@ def eval_linear(args):
             raise Exception(f"invalid model: {args.arch}")
 
     if "pth" in args.pretrained_weights or "pyth" in args.pretrained_weights :  #* not any args, initialize with dino weights
-        if "pth.tar" in args.pretrained_weights :   #* local trained weights
+        if "pth.tar" in args.pretrained_weights  :   #* local trained weights
             renamed_checkpoint = torch.load(args.pretrained_weights)['state_dict']
         else :    
             ckpt = torch.load(args.pretrained_weights)
             #  select_ckpt = 'motion_teacher' if args.use_flow else "teacher"
             if "teacher" in ckpt:
                 ckpt = ckpt["teacher"]
-                
             if "vitb" in args.pretrained_weights or "our" in args.pretrained_weights :   #* svt k400 pretrained weights from repo
                 renamed_checkpoint = {x[len("backbone."):]: y for x, y in ckpt.items() if x.startswith("backbone.")}
             elif "TimeSformer" in args.pretrained_weights :
                 renamed_checkpoint = {x[len("model."):]: y for x, y in ckpt.items() if x.startswith("model.") and not "head" in x}
             else :
                 renamed_checkpoint = ckpt
-                
         msg = model.load_state_dict(renamed_checkpoint, strict=False)
         print("load pretrained model on eval_finetune.py")
         print(f"Loaded model with msg: {msg}")
         
     model.cuda()
     print(f"Model {args.arch} {args.patch_size}x{args.patch_size} built.")
-
+    
 
     params_groups = utils.get_params_groups(model)
     
@@ -396,6 +392,8 @@ if __name__ == '__main__':
     parser.add_argument('--num_labels', default=1000, type=int, help='Number of labels for linear classifier')
     parser.add_argument('--dataset', default="ucf101", help='Dataset: ucf101 / hmdb51')
     parser.add_argument('--use_flow', default=False, type=utils.bool_flag, help="use flow teacher")
+    parser.add_argument('--img_pretrained', default=False, type=bool)
+    
 
     # config file
     parser.add_argument("--cfg", dest="cfg_file", help="Path to the config file", type=str,
@@ -407,7 +405,6 @@ if __name__ == '__main__':
     import time
     
     start = time.time()
-    
     
     best_acc = eval_linear(args)
 

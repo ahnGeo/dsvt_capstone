@@ -7,7 +7,7 @@ import torch
 import torchvision.io as io
 
 
-def temporal_sampling(frames, start_idx, end_idx, num_samples):
+def temporal_sampling(frames, start_idx, end_idx, num_samples, mode):
     """
     Given the start and end frame index, sample num_samples frames between
     the start and end with equal interval.
@@ -21,9 +21,21 @@ def temporal_sampling(frames, start_idx, end_idx, num_samples):
         frames (tersor): a tensor of temporal sampled video frames, dimension is
             `num clip frames` x `channel` x `height` x `width`.
     """
-    index = torch.linspace(start_idx, end_idx, num_samples)
-    index = torch.clamp(index, 0, frames.shape[0] - 1).long()
-    frames = torch.index_select(frames, 0, index)
+    if mode in ["train", "val"] :
+        #! select randomly from each split of frames indices == random uniform sampling
+        video_len = end_idx + 1     # end_idx = video_len - 1
+        index = torch.LongTensor([i for i in range(video_len)])
+        index = torch.tensor_split(index, num_samples)
+        selected_index = []
+        for index_split in index :
+            selected_index.append(random.randint(index_split[0], index_split[-1]))
+        selected_index = torch.LongTensor(selected_index)
+    
+    elif mode == "test" :    
+        #! fixed uniform sampling
+        index = torch.linspace(start_idx, end_idx, num_samples)
+        selected_index = torch.clamp(index, 0, frames.shape[0] - 1).long()
+    frames = torch.index_select(frames, 0, selected_index)
     return frames
 
 
@@ -47,14 +59,17 @@ def get_start_end_idx(video_size, clip_size, clip_idx, num_clips):
         start_idx (int): the start frame index.
         end_idx (int): the end frame index.
     """
-    delta = max(video_size - clip_size, 0)
-    if clip_idx == -1:
-        # Random temporal sampling.
-        start_idx = random.uniform(0, delta)
-    else:
-        # Uniformly sample the clip with the given index.
-        start_idx = delta * clip_idx / num_clips
-    end_idx = start_idx + clip_size - 1
+    # delta = max(video_size - clip_size, 0)
+    # if clip_idx == -1:
+    #     # Random temporal sampling.
+    #     start_idx = random.uniform(0, delta)
+    # else:
+    #     # Uniformly sample the clip with the given index.
+    #     start_idx = delta * clip_idx / num_clips
+    # end_idx = start_idx + clip_size - 1
+    
+    start_idx = 0
+    end_idx = video_size - 1  #! set to video len
     return start_idx, end_idx
 
 
@@ -314,9 +329,7 @@ def decode(
     end=None,
     duration=None,
     frames_length=None,
-    temporal_aug=False,
-    two_token=False,
-    rand_fr=False
+    mode=None
 ):
     """
     Decode the video and perform temporal sampling.
@@ -340,9 +353,6 @@ def decode(
         max_spatial_scale (int): keep the aspect ratio and resize the frame so
             that shorter edge size is max_spatial_scale. Only used in
             `torchvision` backend.
-        temporal_aug: bool
-        two_token: bool
-        rand_fr: bool
     Returns:
         frames (tensor): decoded frames from the video.
     """
@@ -386,55 +396,14 @@ def decode(
     if frames is None or frames.size(0) == 0:
         return None
 
-    clip_sz = sampling_rate * num_frames / target_fps * fps
+    clip_sz = sampling_rate * num_frames / target_fps * fps    
     start_idx, end_idx = get_start_end_idx(
-        video_size=frames.shape[0],
-        clip_size=clip_sz,
-        clip_idx=clip_idx if decode_all_video else 0,
-        num_clips=num_clips if decode_all_video else 1,
+        frames.shape[0],
+        clip_sz,
+        clip_idx if decode_all_video else 0,
+        num_clips if decode_all_video else 1,
     )
-    # Perform temporal sampling from the decoded video.
-    if two_token:
-        max_len = frames.shape[0]
-        global_samples = []
-        for _ in range(3):
-            random_idx = random.randint(0, 6)
-            cur_global = temporal_sampling(frames, random_idx, max_len - random_idx, num_frames)
-            global_samples.append(cur_global)
-        local_samples = []
-        local_width = max_len // 8
-        for _ in range(2):
-            random_idx = random.randint(0, max_len - local_width - 1)
-            cur_local = temporal_sampling(frames, random_idx, random_idx + local_width, num_frames)
-            local_samples.append(cur_local)
-        frames = [*global_samples, *local_samples]
-    elif temporal_aug:
-        max_len = frames.shape[0]
-
-        if rand_fr:
-            global_1 = temporal_sampling(frames, 0, max_len - 5, 4)
-            global_2 = temporal_sampling(frames, 5, max_len, 8)
-            local_samples = []
-            local_width = max_len // 8
-            num_local_frames = [2, 2, 4, 4, 8, 8, 16, 16]
-            for l_idx in range(8):
-                random_idx = random.randint(0, max_len - local_width - 1)
-                cur_local = temporal_sampling(frames, random_idx, random_idx + local_width, num_local_frames[l_idx])
-                local_samples.append(cur_local)
-        else:
-            num_global_frames = num_frames
-            num_local_frames = num_frames
-            global_1 = temporal_sampling(frames, 0, max_len - 5, num_global_frames)
-            global_2 = temporal_sampling(frames, 5, max_len, num_global_frames)
-            local_samples = []
-            local_width = max_len // 8
-            for _ in range(8):
-                random_idx = random.randint(0, max_len - local_width - 1)
-                cur_local = temporal_sampling(frames, random_idx, random_idx + local_width, num_local_frames)
-                local_samples.append(cur_local)
-
-        frames = [global_1, global_2, *local_samples]
-
-    else:
-        frames = temporal_sampling(frames, start_idx, end_idx, num_frames)  # frames.shape = (T, H, W, C)
+    
+    # Perform temporal sampling from the decoded video.    
+    frames = temporal_sampling(frames, start_idx, end_idx, num_frames, mode)
     return frames
