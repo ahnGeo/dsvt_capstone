@@ -6,7 +6,7 @@ import torch
 import torch.utils.data
 
 from datasets.data_utils import get_random_sampling_rate, tensor_normalize, spatial_sampling, pack_pathway_output
-from datasets.decoder import decode
+from datasets.decoder_ucf import decode
 from datasets.video_container import get_video_container
 from datasets.transform import VideoDataAugmentationDINO
 from einops import rearrange

@@ -36,6 +36,7 @@ def eval_linear(args):
     np.random.seed(config.RNG_SEED)
     
     utils.init_distributed_mode(args)
+    
     print("git:\n  {}\n".format(utils.get_sha()))
     print("\n".join("%s: %s" % (k, str(v)) for k, v in sorted(dict(vars(args)).items())))
     cudnn.benchmark = True
@@ -75,7 +76,7 @@ def eval_linear(args):
     else:
         raise NotImplementedError(f"invalid dataset: {args.dataset}")
 
-    sampler = torch.utils.data.distributed.DistributedSampler(dataset_train)
+    sampler = torch.utils.data.distributed.DistributedSampler(dataset_train, shuffle=True)
     train_loader = torch.utils.data.DataLoader(
         dataset_train,
         sampler=sampler,
@@ -83,14 +84,14 @@ def eval_linear(args):
         num_workers=args.num_workers,
         pin_memory=True,
     )
-    val_loader = torch.utils.data.DataLoader(
+    val_loader = torch.utils.data.DataLoader(    #* shuffle=False
         dataset_val,
         batch_size=args.batch_size_per_gpu,
         num_workers=args.num_workers,
         pin_memory=True,
     )
 
-    multi_crop_val_loader = torch.utils.data.DataLoader(
+    multi_crop_val_loader = torch.utils.data.DataLoader(     #* shuffle=False
         multi_crop_val,
         batch_size=args.batch_size_per_gpu,
         num_workers=args.num_workers,
@@ -115,7 +116,17 @@ def eval_linear(args):
             model_embed_dim = 1024
         else:
             raise Exception(f"invalid model: {args.arch}")
-
+    
+    
+    cur_device = torch.cuda.current_device()
+    model.cuda()
+    model = nn.SyncBatchNorm.convert_sync_batchnorm(model)
+    model = torch.nn.parallel.DistributedDataParallel(
+            module=model, device_ids=[cur_device], output_device=cur_device
+        )
+    model_without_ddp = model.module
+    print(f"Model {args.arch} {args.patch_size}x{args.patch_size} built.")
+    
     if "pth" in args.pretrained_weights or "pyth" in args.pretrained_weights :  #* not any args, initialize with dino weights
         if "pth.tar" in args.pretrained_weights  :   #* local trained weights
             renamed_checkpoint = torch.load(args.pretrained_weights)['state_dict']
@@ -130,80 +141,12 @@ def eval_linear(args):
                 renamed_checkpoint = {x[len("model."):]: y for x, y in ckpt.items() if x.startswith("model.") and not "head" in x}
             else :
                 renamed_checkpoint = ckpt
-        msg = model.load_state_dict(renamed_checkpoint, strict=False)
+        msg = model_without_ddp.load_state_dict(renamed_checkpoint, strict=False)
         print("load pretrained model on eval_finetune.py")
         print(f"Loaded model with msg: {msg}")
-        
-    model.cuda()
-    print(f"Model {args.arch} {args.patch_size}x{args.patch_size} built.")
-    
 
-    params_groups = utils.get_params_groups(model)
-    
-    # set optimizer
-    optimizer = torch.optim.SGD(
-        model.parameters(),
-        # params_groups,
-        args.lr * (args.batch_size_per_gpu * utils.get_world_size()) / 256., # linear scaling rule
-        # args.lr,
-        momentum=0.9,
-        # weight_decay=0, # we do not apply weight decay
-        weight_decay=0.0001        
-    )
-    # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, args.epochs, eta_min=0)
-    scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[11,14], gamma=0.1)
-    # scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[25,45], gamma=0.1)
+    n = args.n_last_blocks
 
-
-    to_restore = {"epoch": 0, "best_acc": 0.}
-    start_epoch = to_restore["epoch"]
-    best_acc = to_restore["best_acc"]
-
-    
-
-    for epoch in range(start_epoch, args.epochs):
-        train_loader.sampler.set_epoch(epoch)
-
-        train_stats = train(model, optimizer, train_loader, epoch, args.n_last_blocks, args.avgpool_patchtokens)
-        scheduler.step()
-
-        log_stats = {**{f'train_{k}': v for k, v in train_stats.items()},
-                     'epoch': epoch}
-        if epoch % args.val_freq == 0 or epoch == args.epochs - 1:
-            test_stats = validate_network(val_loader, model, args.n_last_blocks, args.avgpool_patchtokens)
-            print(f"Accuracy at epoch {epoch} of the network on the {len(dataset_val)} test images: {test_stats['acc1']:.2f}%")
-            best_acc = max(best_acc, test_stats["acc1"])
-            print(f'Max accuracy so far: {best_acc:.2f}%')
-            log_stats = {**{k: v for k, v in log_stats.items()},
-                         **{f'test_{k}': v for k, v in test_stats.items()}}
-        if utils.is_main_process():
-            with (Path(args.output_dir) / "log.txt").open("a") as f:
-                f.write(json.dumps(log_stats) + "\n")
-            save_dict = {
-                "epoch": epoch + 1,
-                "state_dict": model.state_dict(),
-                "optimizer": optimizer.state_dict(),
-                "scheduler": scheduler.state_dict(),
-                "best_acc": best_acc,
-            }
-            torch.save(save_dict, os.path.join(args.output_dir, "checkpoint.pth.tar"))
-
-    test_stats = validate_network_multi_view(multi_crop_val_loader, model, args.n_last_blocks,
-                                             args.avgpool_patchtokens, config)
-    print("multi view results : ")
-    print(test_stats)
-
-    print("Training of the supervised linear classifier on frozen features completed.\n"
-          "Top-1 test accuracy: {acc:.2f}".format(acc=best_acc))
-
-    return best_acc
-
-def train(model, optimizer, loader, epoch, n, avgpool):
-    model.train()
-    metric_logger = utils.MetricLogger(delimiter="  ")
-    metric_logger.add_meter('lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
-    header = 'Epoch: [{}]'.format(epoch)
-    
     if n == -1 : 
         print("#################################################\nlinear probing\n#################################################")
     elif n == 0 :
@@ -231,6 +174,74 @@ def train(model, optimizer, loader, epoch, n, avgpool):
                 param.requires_grad = True
             else :
                 param.requires_grad = False
+
+
+    params_groups = utils.get_params_groups(model)
+    
+    # set optimizer
+    optimizer = torch.optim.SGD(
+        # model.parameters(),
+        params_groups,
+        args.lr * (args.batch_size_per_gpu * utils.get_world_size()) / 256., # linear scaling rule
+        # args.lr,
+        momentum=0.9,
+        # weight_decay=0, # we do not apply weight decay
+        weight_decay=0.0001        
+    )
+    # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, args.epochs, eta_min=0)
+    scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[11,14], gamma=0.1)
+    # scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[25,45], gamma=0.1)
+
+
+    to_restore = {"epoch": 0, "best_acc": 0.}
+    start_epoch = to_restore["epoch"]
+    best_acc = to_restore["best_acc"]
+
+    
+
+    for epoch in range(start_epoch, args.epochs):
+        train_loader.sampler.set_epoch(epoch)
+
+        train_stats = train(model, optimizer, train_loader, epoch, args.avgpool_patchtokens)
+        scheduler.step()
+
+        log_stats = {**{f'train_{k}': v for k, v in train_stats.items()},
+                     'epoch': epoch}
+        if epoch % args.val_freq == 0 or epoch == args.epochs - 1:
+            test_stats = validate_network(val_loader, model, args.n_last_blocks, args.avgpool_patchtokens)
+            print(f"Accuracy at epoch {epoch} of the network on the {len(dataset_val)} test images: {test_stats['acc1']:.2f}%")
+            best_acc = max(best_acc, test_stats["acc1"])
+            print(f'Max accuracy so far: {best_acc:.2f}%')
+            log_stats = {**{k: v for k, v in log_stats.items()},
+                         **{f'test_{k}': v for k, v in test_stats.items()}}
+        if utils.is_main_process():
+            with (Path(args.output_dir) / "log.txt").open("a") as f:
+                f.write(json.dumps(log_stats) + "\n")
+            save_dict = {
+                "epoch": epoch + 1,
+                "state_dict": model.state_dict(),
+                "optimizer": optimizer.state_dict(),
+                "scheduler": scheduler.state_dict(),
+                "best_acc": best_acc,
+            }
+            torch.save(save_dict, os.path.join(args.output_dir, "checkpoint.pth.tar"))
+            
+
+    test_stats = validate_network_multi_view(multi_crop_val_loader, model, args.n_last_blocks,
+                                             args.avgpool_patchtokens, config)
+    print("multi view results : ")
+    print(test_stats)
+
+    print("Training of the supervised linear classifier on frozen features completed.\n"
+          "Top-1 test accuracy: {acc:.2f}".format(acc=best_acc))
+
+    return best_acc
+
+def train(model, optimizer, loader, epoch, avgpool):
+    model.train()
+    metric_logger = utils.MetricLogger(delimiter="  ")
+    metric_logger.add_meter('lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
+    header = 'Epoch: [{}]'.format(epoch)
     
 
     for (inp, target, sample_idx, meta) in metric_logger.log_every(loader, 20, header):
@@ -258,6 +269,8 @@ def train(model, optimizer, loader, epoch, n, avgpool):
         torch.cuda.synchronize()
         metric_logger.update(loss=loss.item())
         metric_logger.update(lr=optimizer.param_groups[0]["lr"])
+        metric_logger.update(wd=optimizer.param_groups[0]["weight_decay"])
+        
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()
     print("Averaged stats:", metric_logger)
