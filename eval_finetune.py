@@ -122,7 +122,7 @@ def eval_linear(args):
     model.cuda()
     model = nn.SyncBatchNorm.convert_sync_batchnorm(model)
     model = torch.nn.parallel.DistributedDataParallel(
-            module=model, device_ids=[cur_device], output_device=cur_device
+            module=model, device_ids=[cur_device], output_device=cur_device, find_unused_parameters=True
         )
     model_without_ddp = model.module
     print(f"Model {args.arch} {args.patch_size}x{args.patch_size} built.")
@@ -185,11 +185,11 @@ def eval_linear(args):
         args.lr * (args.batch_size_per_gpu * utils.get_world_size()) / 256., # linear scaling rule
         # args.lr,
         momentum=0.9,
-        # weight_decay=0, # we do not apply weight decay
-        weight_decay=0.0001        
+        weight_decay=0, # we do not apply weight decay
+        # weight_decay=0.0001        
     )
-    # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, args.epochs, eta_min=0)
-    scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[11,14], gamma=0.1)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, args.epochs, eta_min=0)
+    # scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[11,14], gamma=0.1)
     # scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[25,45], gamma=0.1)
 
 
