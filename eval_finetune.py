@@ -138,6 +138,7 @@ def eval_linear(args):
             if "vitb" in args.pretrained_weights or "our" in args.pretrained_weights :   #* svt k400 pretrained weights from repo
                 renamed_checkpoint = {x[len("backbone."):]: y for x, y in ckpt.items() if x.startswith("backbone.")}
             elif "TimeSformer" in args.pretrained_weights :
+                ckpt = ckpt['model_state']
                 renamed_checkpoint = {x[len("model."):]: y for x, y in ckpt.items() if x.startswith("model.") and not "head" in x}
             else :
                 renamed_checkpoint = ckpt
