@@ -109,6 +109,7 @@ def eval_linear(args):
         model_embed_dim = 2 * model.embed_dim
     else:
         if args.arch == "vit_base":
+            args.img_pretrained = False
             model = get_vit_base_patch16_224(cfg=config, no_head=False, pretrained=args.img_pretrained)     #^ head = linear classifier
             model_embed_dim = model.embed_dim
         elif args.arch == "swin":
@@ -118,23 +119,22 @@ def eval_linear(args):
             raise Exception(f"invalid model: {args.arch}")
     
     
-    cur_device = torch.cuda.current_device()
-    model.cuda()
-    model = nn.SyncBatchNorm.convert_sync_batchnorm(model)
-    model = torch.nn.parallel.DistributedDataParallel(
-            module=model, device_ids=[cur_device], output_device=cur_device, find_unused_parameters=True
-        )
-    model_without_ddp = model.module
-    print(f"Model {args.arch} {args.patch_size}x{args.patch_size} built.")
     
-    if "pth" in args.pretrained_weights or "pyth" in args.pretrained_weights :  #* not any args, initialize with dino weights
+    if "our" in args.pretrained_weights :
+        ckpt = torch.load(args.pretrained_weights)
+        renamed_checkpoint = {'module'+x[len("backbone."):]: y for x, y in ckpt.items() if x.startswith("backbone.")}
+        msg = model.load_state_dict(renamed_checkpoint, strict=False)
+        print("load pretrained model on eval_finetune.py")
+        print(f"Loaded model with msg: {msg}")
+        
+    elif "pth" in args.pretrained_weights or "pyth" in args.pretrained_weights :  #* not any args, initialize with dino weights
         if "pth.tar" in args.pretrained_weights  :   #* local trained weights
             renamed_checkpoint = torch.load(args.pretrained_weights)['state_dict']
         else :    
-            ckpt = torch.load(args.pretrained_weights)
-            #  select_ckpt = 'motion_teacher' if args.use_flow else "teacher"
+            ckpt = torch.load(args.pretrained_weights, map_location=torch.device('cuda'))
             if "teacher" in ckpt:
                 ckpt = ckpt["teacher"]
+
             if "vitb" in args.pretrained_weights or "our" in args.pretrained_weights :   #* svt k400 pretrained weights from repo
                 renamed_checkpoint = {x[len("backbone."):]: y for x, y in ckpt.items() if x.startswith("backbone.")}
             elif "TimeSformer" in args.pretrained_weights :
@@ -142,9 +142,20 @@ def eval_linear(args):
                 renamed_checkpoint = {x[len("model."):]: y for x, y in ckpt.items() if x.startswith("model.") and not "head" in x}
             else :
                 renamed_checkpoint = ckpt
-        msg = model_without_ddp.load_state_dict(renamed_checkpoint, strict=False)
+
+        msg = model.load_state_dict(renamed_checkpoint, strict=False)
+        # msg = model.load_state_dict(renamed_checkpoint, strict=False)
+        
         print("load pretrained model on eval_finetune.py")
         print(f"Loaded model with msg: {msg}")
+
+    cur_device = torch.cuda.current_device()
+    model.cuda()
+    model = nn.SyncBatchNorm.convert_sync_batchnorm(model)
+    model = torch.nn.parallel.DistributedDataParallel(
+            module=model, device_ids=[cur_device], output_device=cur_device, find_unused_parameters=False
+        )
+    print(f"Model {args.arch} {args.patch_size}x{args.patch_size} built.")
 
     n = args.n_last_blocks
 
@@ -186,11 +197,11 @@ def eval_linear(args):
         args.lr * (args.batch_size_per_gpu * utils.get_world_size()) / 256., # linear scaling rule
         # args.lr,
         momentum=0.9,
-        weight_decay=0, # we do not apply weight decay
-        # weight_decay=0.0001        
+        # weight_decay=0, # we do not apply weight decay
+        weight_decay=0.0001        
     )
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, args.epochs, eta_min=0)
-    # scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[11,14], gamma=0.1)
+    # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, args.epochs, eta_min=0)
+    scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[11,14], gamma=0.1)
     # scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[25,45], gamma=0.1)
 
 
