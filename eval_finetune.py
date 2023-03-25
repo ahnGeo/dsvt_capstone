@@ -118,10 +118,11 @@ def eval_linear(args):
             raise Exception(f"invalid model: {args.arch}")
     
     
-    
     if "our" in args.pretrained_weights :
-        ckpt = torch.load(args.pretrained_weights)
-        renamed_checkpoint = {'module'+x[len("backbone."):]: y for x, y in ckpt.items() if x.startswith("backbone.")}
+        ckpt = torch.load(args.pretrained_weights, map_location=torch.device('cuda'))
+        ckpt = ckpt['teacher']
+        renamed_checkpoint = {x[len("backbone."):]: y for x, y in ckpt.items() if x.startswith("backbone.") and "head" not in x}
+        # renamed_checkpoint['cls_token'] = ckpt['module.ca_head.cls_token']
         msg = model.load_state_dict(renamed_checkpoint, strict=False)
         print("load pretrained model on eval_finetune.py")
         print(f"Loaded model with msg: {msg}")
