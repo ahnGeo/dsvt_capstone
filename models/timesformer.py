@@ -30,7 +30,7 @@ default_cfgs = {
         url = "https://dl.fbaipublicfiles.com/dino/dino_vitbase16_pretrain/dino_vitbase16_pretrain.pth",
         mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225),
     ),
-    'vit_base_patch16_224_i-1k': _cfg(
+    'vit_base_patch16_224-21k': _cfg(
         url='https://github.com/rwightman/pytorch-image-models/releases/download/v0.1-vitjx/jx_vit_base_p16_224-80ecf9dd.pth',
         mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5),
     ),
@@ -605,7 +605,7 @@ def get_vit_base_patch16_224(cfg, no_head=False, pretrained=False, **kwargs):
                             attn_drop_rate=0., drop_path_rate=0.1, num_frames=cfg.DATA.NUM_FRAMES,
                             attention_type=cfg.TIMESFORMER.ATTENTION_TYPE, **kwargs)
     vit.attention_type = cfg.TIMESFORMER.ATTENTION_TYPE
-    vit.default_cfg = default_cfgs['deit_base_patch16_224_i-1k']
+    vit.default_cfg = default_cfgs['vit_base_patch16_224-21k']
     vit.num_patches = (cfg.DATA.TRAIN_CROP_SIZE // patch_size) * (cfg.DATA.TRAIN_CROP_SIZE // patch_size)
     pretrained_model = cfg.TIMESFORMER.PRETRAINED_MODEL
     # if pretrained_model == "" :

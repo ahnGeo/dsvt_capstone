@@ -109,7 +109,6 @@ def eval_linear(args):
         model_embed_dim = 2 * model.embed_dim
     else:
         if args.arch == "vit_base":
-            args.img_pretrained = False
             model = get_vit_base_patch16_224(cfg=config, no_head=False, pretrained=args.img_pretrained)     #^ head = linear classifier
             model_embed_dim = model.embed_dim
         elif args.arch == "swin":
