@@ -32,8 +32,9 @@ def eval_linear(args):
 
     config = load_config(args)
     
-    torch.manual_seed(config.RNG_SEED)
-    np.random.seed(config.RNG_SEED)
+    # torch.manual_seed(config.RNG_SEED)
+    # np.random.seed(config.RNG_SEED)
+    utils.fix_random_seeds(config.RNG_SEED)
     
     utils.init_distributed_mode(args)
     
@@ -76,16 +77,19 @@ def eval_linear(args):
     else:
         raise NotImplementedError(f"invalid dataset: {args.dataset}")
 
-    sampler = torch.utils.data.distributed.DistributedSampler(dataset_train, shuffle=True)
+    train_sampler = torch.utils.data.distributed.DistributedSampler(dataset_train, shuffle=True)
+    val_sampler = torch.utils.data.distributed.DistributedSampler(dataset_val, shuffle=False)
+    
     train_loader = torch.utils.data.DataLoader(
         dataset_train,
-        sampler=sampler,
+        sampler=train_sampler,
         batch_size=args.batch_size_per_gpu,
         num_workers=args.num_workers,
         pin_memory=True,
     )
     val_loader = torch.utils.data.DataLoader(    #* shuffle=False
         dataset_val,
+        sampler=val_sampler,
         batch_size=args.batch_size_per_gpu,
         num_workers=args.num_workers,
         pin_memory=True,
@@ -122,7 +126,11 @@ def eval_linear(args):
         ckpt = torch.load(args.pretrained_weights, map_location=torch.device('cuda'))
         ckpt = ckpt['teacher']
         renamed_checkpoint = {x[len("backbone."):]: y for x, y in ckpt.items() if x.startswith("backbone.") and "head" not in x}
-        # renamed_checkpoint['cls_token'] = ckpt['module.ca_head.cls_token']
+        if args.dsvt :
+            renamed_checkpoint['cls_token'] = ckpt['ca_head.cls_token']
+            renamed_checkpoint['norm.weight'] = ckpt['ca_head.norm.weight']
+            renamed_checkpoint['norm.bias'] = ckpt['ca_head.norm.bias']
+        
         msg = model.load_state_dict(renamed_checkpoint, strict=False)
         print("load pretrained model on eval_finetune.py")
         print(f"Loaded model with msg: {msg}")
@@ -220,6 +228,7 @@ def eval_linear(args):
         log_stats = {**{f'train_{k}': v for k, v in train_stats.items()},
                      'epoch': epoch}
         if epoch % args.val_freq == 0 or epoch == args.epochs - 1:
+            # val_loader.sampler.set_epoch(epoch)
             test_stats = validate_network(val_loader, model, args.n_last_blocks, args.avgpool_patchtokens)
             print(f"Accuracy at epoch {epoch} of the network on the {len(dataset_val)} test images: {test_stats['acc1']:.2f}%")
             best_acc = max(best_acc, test_stats["acc1"])
@@ -417,7 +426,8 @@ if __name__ == '__main__':
     parser.add_argument('--num_labels', default=1000, type=int, help='Number of labels for linear classifier')
     parser.add_argument('--dataset', default="ucf101", help='Dataset: ucf101 / hmdb51')
     parser.add_argument('--use_flow', default=False, type=utils.bool_flag, help="use flow teacher")
-    parser.add_argument('--img_pretrained', default=False, type=bool)
+    parser.add_argument('--img_pretrained', default=False, type=utils.bool_flag)
+    parser.add_argument('--dsvt', default=False, type=utils.bool_flag)
     
 
     # config file
