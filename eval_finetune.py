@@ -121,6 +121,14 @@ def eval_linear(args):
         else:
             raise Exception(f"invalid model: {args.arch}")
     
+    cur_device = torch.cuda.current_device()
+    model.cuda()
+    model = nn.SyncBatchNorm.convert_sync_batchnorm(model)
+    model = torch.nn.parallel.DistributedDataParallel(
+            module=model, device_ids=[cur_device], output_device=cur_device, find_unused_parameters=False
+        )
+    print(f"Model {args.arch} {args.patch_size}x{args.patch_size} built.")
+    model_without_ddp = model.module
     
     if "our" in args.pretrained_weights :
         ckpt = torch.load(args.pretrained_weights, map_location=torch.device('cuda'))
@@ -131,7 +139,7 @@ def eval_linear(args):
             renamed_checkpoint['norm.weight'] = ckpt['ca_head.norm.weight']
             renamed_checkpoint['norm.bias'] = ckpt['ca_head.norm.bias']
         
-        msg = model.load_state_dict(renamed_checkpoint, strict=False)
+        msg = model_without_ddp.load_state_dict(renamed_checkpoint, strict=False)
         print("load pretrained model on eval_finetune.py")
         print(f"Loaded model with msg: {msg}")
         
@@ -151,19 +159,12 @@ def eval_linear(args):
             else :
                 renamed_checkpoint = ckpt
 
-        msg = model.load_state_dict(renamed_checkpoint, strict=False)
+        msg = model_without_ddp.load_state_dict(renamed_checkpoint, strict=False)
         # msg = model.load_state_dict(renamed_checkpoint, strict=False)
         
         print("load pretrained model on eval_finetune.py")
         print(f"Loaded model with msg: {msg}")
 
-    cur_device = torch.cuda.current_device()
-    model.cuda()
-    model = nn.SyncBatchNorm.convert_sync_batchnorm(model)
-    model = torch.nn.parallel.DistributedDataParallel(
-            module=model, device_ids=[cur_device], output_device=cur_device, find_unused_parameters=False
-        )
-    print(f"Model {args.arch} {args.patch_size}x{args.patch_size} built.")
 
     n = args.n_last_blocks
 
