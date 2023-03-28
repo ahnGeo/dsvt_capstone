@@ -124,9 +124,14 @@ def eval_linear(args):
     cur_device = torch.cuda.current_device()
     model.cuda()
     model = nn.SyncBatchNorm.convert_sync_batchnorm(model)
-    model = torch.nn.parallel.DistributedDataParallel(
-            module=model, device_ids=[cur_device], output_device=cur_device, find_unused_parameters=False
-        )
+    if args.dsvt :
+        model = torch.nn.parallel.DistributedDataParallel(
+                module=model, device_ids=[cur_device], output_device=cur_device, find_unused_parameters=True
+            )
+    else :
+        model = torch.nn.parallel.DistributedDataParallel(
+                module=model, device_ids=[cur_device], output_device=cur_device, find_unused_parameters=False
+            )
     print(f"Model {args.arch} {args.patch_size}x{args.patch_size} built.")
     model_without_ddp = model.module
     
@@ -160,7 +165,6 @@ def eval_linear(args):
                 renamed_checkpoint = ckpt
 
         msg = model_without_ddp.load_state_dict(renamed_checkpoint, strict=False)
-        # msg = model.load_state_dict(renamed_checkpoint, strict=False)
         
         print("load pretrained model on eval_finetune.py")
         print(f"Loaded model with msg: {msg}")
@@ -200,20 +204,23 @@ def eval_linear(args):
     params_groups = utils.get_params_groups(model)
     
     # set optimizer
-    optimizer = torch.optim.SGD(
-        # model.parameters(),
-        params_groups,
-        args.lr * (args.batch_size_per_gpu * utils.get_world_size()) / 256., # linear scaling rule
-        # args.lr,
-        momentum=0.9,
-        # weight_decay=0, # we do not apply weight decay
-        weight_decay=0.0001        
-    )
-    # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, args.epochs, eta_min=0)
-    scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[11,14], gamma=0.1)
-    # scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[25,45], gamma=0.1)
-
-
+    if not args.eval_linear :
+        optimizer = torch.optim.SGD(
+            params_groups,
+            args.lr * (args.batch_size_per_gpu * utils.get_world_size()) / 256., # linear scaling rule
+            momentum=0.9,
+            weight_decay=0.0001        
+        )
+        scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[11,14], gamma=0.1)
+    else :
+        optimizer = torch.optim.SGD(
+            params_groups,
+            args.lr * (args.batch_size_per_gpu * utils.get_world_size()) / 256., # linear scaling rule
+            momentum=0.9,
+            weight_decay=0, # we do not apply weight decay
+        )
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, args.epochs, eta_min=0)
+        
     to_restore = {"epoch": 0, "best_acc": 0.}
     start_epoch = to_restore["epoch"]
     best_acc = to_restore["best_acc"]
@@ -429,6 +436,7 @@ if __name__ == '__main__':
     parser.add_argument('--use_flow', default=False, type=utils.bool_flag, help="use flow teacher")
     parser.add_argument('--img_pretrained', default=False, type=utils.bool_flag)
     parser.add_argument('--dsvt', default=False, type=utils.bool_flag)
+    parser.add_argument("--eval_linear", default=False, type=utils.bool_flag)
     
 
     # config file
