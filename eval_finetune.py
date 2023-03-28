@@ -21,7 +21,7 @@ from torch import nn
 from tqdm import tqdm
 
 from datasets import UCF101, HMDB51, Kinetics, KTH, Diving48
-from models import get_vit_base_patch16_224, get_aux_token_vit, SwinTransformer3D
+from models import get_vit_base_patch16_224, SwinTransformer3D, get_vmae_vit_base_patch16_224
 from utils import utils
 from utils.meters import TestMeter
 from utils.parser import load_config
@@ -115,6 +115,8 @@ def eval_linear(args):
         if args.arch == "vit_base":
             model = get_vit_base_patch16_224(cfg=config, no_head=False, pretrained=args.img_pretrained)     #^ head = linear classifier
             model_embed_dim = model.embed_dim
+        elif args.arch == "vmae_vit_base" :
+            model = get_vmae_vit_base_patch16_224(cfg=config, no_head=False, init_scale=1)
         elif args.arch == "swin":
             model = SwinTransformer3D(depths=[2, 2, 18, 2], embed_dim=128, num_heads=[4, 8, 16, 32])
             model_embed_dim = 1024
@@ -124,7 +126,7 @@ def eval_linear(args):
     cur_device = torch.cuda.current_device()
     model.cuda()
     model = nn.SyncBatchNorm.convert_sync_batchnorm(model)
-    if args.dsvt :
+    if args.dsvt or "vmae" in args.arch :
         model = torch.nn.parallel.DistributedDataParallel(
                 module=model, device_ids=[cur_device], output_device=cur_device, find_unused_parameters=True
             )
@@ -137,8 +139,11 @@ def eval_linear(args):
     
     if "our" in args.pretrained_weights :
         ckpt = torch.load(args.pretrained_weights, map_location=torch.device('cuda'))
-        ckpt = ckpt['teacher']
+        if "teacher" in ckpt:
+            ckpt = ckpt["teacher"]
+
         renamed_checkpoint = {x[len("backbone."):]: y for x, y in ckpt.items() if x.startswith("backbone.") and "head" not in x}
+
         if args.dsvt :
             renamed_checkpoint['cls_token'] = ckpt['ca_head.cls_token']
             renamed_checkpoint['norm.weight'] = ckpt['ca_head.norm.weight']
@@ -149,20 +154,17 @@ def eval_linear(args):
         print(f"Loaded model with msg: {msg}")
         
     elif "pth" in args.pretrained_weights or "pyth" in args.pretrained_weights :  #* not any args, initialize with dino weights
-        if "pth.tar" in args.pretrained_weights  :   #* local trained weights
-            renamed_checkpoint = torch.load(args.pretrained_weights)['state_dict']
-        else :    
-            ckpt = torch.load(args.pretrained_weights, map_location=torch.device('cuda'))
-            if "teacher" in ckpt:
-                ckpt = ckpt["teacher"]
-
-            if "vitb" in args.pretrained_weights or "our" in args.pretrained_weights :   #* svt k400 pretrained weights from repo
-                renamed_checkpoint = {x[len("backbone."):]: y for x, y in ckpt.items() if x.startswith("backbone.")}
-            elif "TimeSformer" in args.pretrained_weights :
-                ckpt = ckpt['model_state']
-                renamed_checkpoint = {x[len("model."):]: y for x, y in ckpt.items() if x.startswith("model.") and not "head" in x}
-            else :
-                renamed_checkpoint = ckpt
+        ckpt = torch.load(args.pretrained_weights, map_location=torch.device('cuda'))
+        
+        if "vitb" in args.pretrained_weights :   #* svt k400 pretrained weights from repo
+            renamed_checkpoint = {x[len("backbone."):]: y for x, y in ckpt.items() if x.startswith("backbone.")}
+        elif "TimeSformer" in args.pretrained_weights :
+            ckpt = ckpt['model_state']
+            renamed_checkpoint = {x[len("model."):]: y for x, y in ckpt.items() if x.startswith("model.") and not "head" in x}
+        elif "vmae" in args.pretrained_weights :
+            renamed_checkpoint = {x[len("encoder."):]: y for x, y in ckpt.items() if x.startswith("encoder.") and not "head" in x}
+        else :
+            renamed_checkpoint = ckpt
 
         msg = model_without_ddp.load_state_dict(renamed_checkpoint, strict=False)
         
@@ -190,6 +192,9 @@ def eval_linear(args):
                 param.requires_grad = True
             elif name == "norm.weight" or name == "norm.bias" or "head" in name :
                 param.requires_grad = True
+            elif "vmae" in args.arch :
+                if "fc_norm" in name or "head" in name :
+                    param.requires_grad = True
             else :
                 param.requires_grad = False
     
@@ -200,8 +205,11 @@ def eval_linear(args):
             else :
                 param.requires_grad = False
 
+    # for n, p in model.named_parameters() :
+    #     print(n, p.requires_grad)
 
     params_groups = utils.get_params_groups(model)
+    
     
     # set optimizer
     if not args.eval_linear :
@@ -412,7 +420,7 @@ if __name__ == '__main__':
                         help="""Whether ot not to concatenate the global average pooled features to the [CLS] token.
         We typically set this to False for ViT-Small and to True with ViT-Base.""")
     parser.add_argument('--arch', default='vit_small', type=str,
-                        choices=['vit_tiny', 'vit_small', 'vit_base', 'swin'],
+                        choices=['vit_tiny', 'vit_small', 'vit_base', 'swin', 'vmae_vit_base'],
                         help='Architecture (support only ViT atm).')
     parser.add_argument('--patch_size', default=16, type=int, help='Patch resolution of the model.')
     parser.add_argument('--pretrained_weights', default='', type=str, help="Path to pretrained weights to evaluate.")

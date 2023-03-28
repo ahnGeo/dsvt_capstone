@@ -1,3 +1,4 @@
-from .timesformer import get_vit_base_patch16_224, get_aux_token_vit
+from .timesformer import get_vit_base_patch16_224
 from .swin_transformer import SwinTransformer3D
 from .s3d import S3D
+from .vmae_vit import get_vmae_vit_base_patch16_224
