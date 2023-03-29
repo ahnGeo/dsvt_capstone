@@ -162,7 +162,10 @@ def eval_linear(args):
             ckpt = ckpt['model_state']
             renamed_checkpoint = {x[len("model."):]: y for x, y in ckpt.items() if x.startswith("model.") and not "head" in x}
         elif "vmae" in args.pretrained_weights :
+            ckpt = ckpt['model']
             renamed_checkpoint = {x[len("encoder."):]: y for x, y in ckpt.items() if x.startswith("encoder.") and not "head" in x}
+            renamed_checkpoint['fc_norm.weight'] = renamed_checkpoint['norm.weight']
+            renamed_checkpoint['fc_norm.bias'] = renamed_checkpoint['norm.bias']
         else :
             renamed_checkpoint = ckpt
 
@@ -213,13 +216,23 @@ def eval_linear(args):
     
     # set optimizer
     if not args.eval_linear :
-        optimizer = torch.optim.SGD(
-            params_groups,
-            args.lr * (args.batch_size_per_gpu * utils.get_world_size()) / 256., # linear scaling rule
-            momentum=0.9,
-            weight_decay=0.0001        
-        )
-        scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[11,14], gamma=0.1)
+        if "vmae" not in args.arch :
+            optimizer = torch.optim.SGD(
+                params_groups,
+                args.lr * (args.batch_size_per_gpu * utils.get_world_size()) / 256., # linear scaling rule
+                momentum=0.9,
+                weight_decay=0.0001 
+            )
+            scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[11,14], gamma=0.1)
+        else :
+            print("set optimizer and scheduler like vmae setting")
+            optimizer = torch.optim.AdamW(
+                params_groups,
+                args.lr * (args.batch_size_per_gpu * utils.get_world_size()) / 256., # linear scaling rule
+                weight_decay=0.05
+            )
+            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, args.epochs, eta_min=1e-6)
+            
     else :
         optimizer = torch.optim.SGD(
             params_groups,
