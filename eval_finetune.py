@@ -51,6 +51,7 @@ def eval_linear(args):
     if args.dataset == "ucf101":
         dataset_train = UCF101(cfg=config, mode="train", num_retries=10)
         dataset_val = UCF101(cfg=config, mode="val", num_retries=10)
+        config.TEST.NUM_ENSEMBLE_VIEWS = 1
         config.TEST.NUM_SPATIAL_CROPS = 3
         multi_crop_val = UCF101(cfg=config, mode="val", num_retries=10)
     elif args.dataset == "hmdb51":
@@ -78,7 +79,7 @@ def eval_linear(args):
         raise NotImplementedError(f"invalid dataset: {args.dataset}")
 
     train_sampler = torch.utils.data.distributed.DistributedSampler(dataset_train, shuffle=True)
-    val_sampler = torch.utils.data.distributed.DistributedSampler(dataset_val, shuffle=False)
+    # val_sampler = torch.utils.data.distributed.DistributedSampler(dataset_val, shuffle=False)
     
     train_loader = torch.utils.data.DataLoader(
         dataset_train,
@@ -89,7 +90,6 @@ def eval_linear(args):
     )
     val_loader = torch.utils.data.DataLoader(    #* shuffle=False
         dataset_val,
-        sampler=val_sampler,
         batch_size=args.batch_size_per_gpu,
         num_workers=args.num_workers,
         pin_memory=True,
@@ -120,6 +120,8 @@ def eval_linear(args):
         elif args.arch == "swin":
             model = SwinTransformer3D(depths=[2, 2, 18, 2], embed_dim=128, num_heads=[4, 8, 16, 32])
             model_embed_dim = 1024
+        # elif args.arch == "dsvt_ca_head" :
+        #     model = 
         else:
             raise Exception(f"invalid model: {args.arch}")
     
