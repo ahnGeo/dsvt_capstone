@@ -206,7 +206,7 @@ class VisionTransformer(nn.Module):
                 drop=drop_rate, attn_drop=attn_drop_rate, drop_path=dpr[i], norm_layer=norm_layer,
                 attention_type=self.attention_type)
             for i in range(self.depth)])
-        # self.norm = norm_layer(embed_dim)
+        self.norm = norm_layer(embed_dim)
 
         # Classifier head
         self.head = nn.Linear(embed_dim, num_classes) if num_classes > 0 else nn.Identity()
@@ -302,6 +302,7 @@ class VisionTransformer(nn.Module):
     def forward(self, x, use_head=False):
         x = self.forward_features(x)  #^ x = [B, 8*196, 768]
         x_mean = x.mean(dim=1)
+        x_mean = self.norm(x_mean)
         x_mean = self.head(x_mean)
         return x_mean
 
@@ -398,6 +399,9 @@ def get_gap_vit_base_patch16_224(cfg, no_head=False, **kwargs):
                         attention_type=vit.attention_type, pretrained_model=pretrained_model)
     if no_head:
         vit.head = None
+        
+    print("norm.weight : \n", vit.norm.weight.data)  
+    
     return vit
 
 
