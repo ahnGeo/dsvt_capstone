@@ -50,47 +50,6 @@ class Mlp(nn.Module):
         x = self.fc2(x)
         x = self.drop(x)
         return x
-class Class_Attention(nn.Module):
-    # taken from https://github.com/rwightman/pytorch-image-models/blob/master/timm/models/vision_transformer.py
-    # with slight modifications to do CA 
-    def __init__(self, dim, num_heads=8, qkv_bias=False, qk_scale=None, attn_drop=0., proj_drop=0.):
-        super().__init__()
-        self.num_heads = num_heads
-        head_dim = dim // num_heads
-        self.scale = qk_scale or head_dim ** -0.5
-
-        self.q = nn.Linear(dim, dim, bias=qkv_bias)
-        self.k = nn.Linear(dim, dim, bias=qkv_bias)
-        self.v = nn.Linear(dim, dim, bias=qkv_bias)
-        self.attn_drop = nn.Dropout(attn_drop)
-        self.proj = nn.Linear(dim, dim)
-        self.proj_drop = nn.Dropout(proj_drop)
-
-    
-    def forward(self, x, attention=False, mask=None):
-        
-        B, N, C = x.shape
-        q = self.q(x[:,0]).unsqueeze(1).reshape(B, 1, self.num_heads, C // self.num_heads).permute(0, 2, 1, 3)
-        k = self.k(x).reshape(B, N, self.num_heads, C // self.num_heads).permute(0, 2, 1, 3)
-
-        q = q * self.scale
-        v = self.v(x).reshape(B, N, self.num_heads, C // self.num_heads).permute(0, 2, 1, 3)
-
-        attn = (q @ k.transpose(-2, -1)) 
-        if mask is not None:
-            mask_temp = torch.cat([torch.ones(B,1).bool().cuda(), mask],dim=1).unsqueeze(1).unsqueeze(1).expand(-1,self.num_heads,-1,-1)
-            attn = attn.masked_fill_(~mask_temp.bool(), float("-inf"))
-        attn = attn.softmax(dim=-1)
-        attn = self.attn_drop(attn)
-
-        x_cls = (attn @ v).transpose(1, 2).reshape(B, 1, C)
-        x_cls = self.proj(x_cls)
-        x_cls = self.proj_drop(x_cls)
-        
-        if attention:
-            return x_cls, attn
-        else:
-            return x_cls
 
 
 class Attention(nn.Module):
@@ -127,97 +86,6 @@ class Attention(nn.Module):
             return x, attn
         return x
 
-
-class LayerScale_Block_CA(nn.Module):
-    # taken from https://github.com/rwightman/pytorch-image-models/blob/master/timm/models/vision_transformer.py
-    # with slight modifications to add CA and LayerScale
-    def __init__(self, dim, num_heads, mlp_ratio=4., qkv_bias=False, qk_scale=None, drop=0., attn_drop=0.,
-                 drop_path=0., act_layer=nn.GELU, norm_layer=nn.LayerNorm, Attention_block = Class_Attention,
-                 Mlp_block=Mlp,attention_type='time_only'):
-        super().__init__()
-        assert (attention_type in ['divided_space_time', 'time_only', 'joint_space_time'])
-
-        self.norm1 = norm_layer(dim)
-        self.attn = Attention_block(
-            dim, num_heads=num_heads, qkv_bias=qkv_bias, qk_scale=qk_scale, attn_drop=attn_drop, proj_drop=drop)
-        
-        self.attention_type = attention_type
-        # Temporal Attention Parameters
-        if self.attention_type == 'divided_space_time':
-            self.temporal_norm1 = norm_layer(dim)
-            self.temporal_attn = Attention_block(
-                dim, num_heads=num_heads, qkv_bias=qkv_bias, qk_scale=qk_scale, attn_drop=attn_drop, proj_drop=drop)
-            self.temporal_fc = nn.Linear(dim, dim)
-        
-        
-        self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
-        self.norm2 = norm_layer(dim)
-        mlp_hidden_dim = int(dim * mlp_ratio)
-        self.mlp = Mlp_block(in_features=dim, hidden_features=mlp_hidden_dim, act_layer=act_layer, drop=drop)
-
-    def forward(self, x, x_cls,B, T, W, loc = False, attention=False, mask=None):
-        num_spatial_tokens = (x.size(1)) // T
-        H = num_spatial_tokens // W
-        #x.shape torch.Size([2, 1568, 768]) block divided
-        
-        if self.attention_type in ['joint_space_time'] or loc:
-            # "For x_loc, simply perform attention."
-            u = torch.cat((x_cls,x),dim=1)
-            x_cls = x_cls + self.drop_path(self.attn(self.norm1(u)))
-            x_cls = x_cls + self.drop_path(self.mlp(self.norm2(x_cls)))
-            return x_cls
-        elif self.attention_type in ['time_only']:
-            x = rearrange(x, 'b (h w t) m -> (b h w) t m', b=B, h=H, w=W, t=T)
-            cls_token = x_cls.repeat(1, W*W, 1)
-            cls_token = rearrange(cls_token, 'b (h w) m -> (b h w) m',b=B, h=H, w=W).unsqueeze(1)
-
-            u = torch.cat((cls_token,x),dim=1)
-            res_temporal= self.drop_path(self.attn(self.norm1(u))).squeeze(1)
-            res_temporal = rearrange(res_temporal, '(b h w) m -> b (h w) m', b=B, h=H, w=W)
-            res_temporal = torch.mean(res_temporal, 1, True)  # averaging for every patch
-
-            x_cls = x_cls + res_temporal
-            x_cls = x_cls + self.drop_path(self.mlp(self.norm2(x_cls)))
-            return x_cls
-        elif self.attention_type in ['divided_space_time']:
-            # temporal
-            init_cls_token = x_cls
-            cls_token = init_cls_token.repeat(1, W*W, 1)
-            cls_token = rearrange(cls_token, 'b (h w) m -> (b h w) m',b=B, h=H, w=W).unsqueeze(1)
-
-            xt = x
-            xt = rearrange(xt, 'b (h w t) m -> (b h w) t m', b=B, h=H, w=W, t=T)
-            xt = torch.cat((cls_token,xt),dim=1)
-
-            res_temporal = self.drop_path(self.temporal_attn(self.temporal_norm1(xt))).squeeze(1)
-            res_temporal = rearrange(res_temporal, '(b h w) m -> b (h w) m', b=B, h=H, w=W)
-            res_temporal = torch.mean(res_temporal, 1, True)  # averaging for every patch
-
-            res_temporal = self.temporal_fc(res_temporal)
-            x_cls = x_cls + res_temporal
-
-            # Spatial
-            init_cls_token = x_cls
-            cls_token = init_cls_token.repeat(1, T, 1)
-            cls_token = rearrange(cls_token, 'b t m -> (b t) m', b=B, t=T).unsqueeze(1)
-
-            xs = x
-            xs = rearrange(xs, 'b (h w t) m -> (b t) (h w) m', b=B, h=H, w=W, t=T)
-            xs = torch.cat((cls_token, xs), 1)
-
-            res_spatial = self.drop_path(self.attn(self.norm1(xs)))
-
-            cls_token = res_spatial[:, 0, :]
-            cls_token = rearrange(cls_token, '(b t) m -> b t m', b=B, t=T)
-            cls_token = torch.mean(cls_token, 1, True)  # averaging for every frame
-
-
-            x_cls = x_cls+cls_token
-
-            # Mlp
-            x_cls = x_cls + self.drop_path(self.mlp(self.norm2(x_cls)))
-            return x_cls
-        
 
     
 class Block(nn.Module):
@@ -432,10 +300,10 @@ class VisionTransformer(nn.Module):
         return x
 
     def forward(self, x, use_head=False):
-        x = self.forward_features(x)
-        if use_head:
-            x = self.head(x)
-        return x
+        x = self.forward_features(x)  #^ x = [B, 8*196, 768]
+        x_mean = x.mean(dim=1)
+        x_mean = self.head(x_mean)
+        return x_mean
 
     def get_intermediate_layers(self, x, n=1):
         x = self.forward_features(x, get_all=True)
@@ -513,7 +381,7 @@ class TimeSformer(nn.Module):
         return x
 
 
-def get_vit_base_patch16_224(cfg, no_head=False, **kwargs):
+def get_gap_vit_base_patch16_224(cfg, no_head=False, **kwargs):
     patch_size = 16
     vit = VisionTransformer(img_size=cfg.DATA.TRAIN_CROP_SIZE, num_classes=cfg.MODEL.NUM_CLASSES,
                             patch_size=patch_size, embed_dim=768, depth=12, num_heads=12, mlp_ratio=4,

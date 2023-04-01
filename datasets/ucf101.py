@@ -67,7 +67,6 @@ class UCF101(torch.utils.data.Dataset):
         Construct the video loader.
         """
         path_to_file = os.path.join(
-            # self.cfg.DATA.PATH_TO_DATA_DIR, "ucf101_{}_split_1_videos_simple.txt".format(self.mode)
             self.cfg.DATA.PATH_TO_DATA_DIR, "ucf101_{}_split_1_videos.txt".format(self.mode)
             
         )

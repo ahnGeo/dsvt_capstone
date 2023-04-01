@@ -275,7 +275,7 @@ class VisionTransformer(nn.Module):
 
         x = self.norm(x)
         if self.fc_norm is not None:     #^ use mean_pooling
-            return self.fc_norm(x.mean(1))     #^ mean and norm
+            return self.fc_norm(x.mean(1))     #^ mean and norm, x = (B, 784, 768)
         else:
             return x[:, 0]
 
