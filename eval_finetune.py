@@ -43,16 +43,20 @@ def eval_linear(args):
     cudnn.benchmark = True
     os.makedirs(args.output_dir, exist_ok=True)
     json.dump(vars(args), open(f"{args.output_dir}/config.json", "w"), indent=4)
+    print(config)
 
     # ============ preparing data ... ============
     # config.DATA.PATH_TO_DATA_DIR = f"{os.path.expanduser('~')}/repo/mmaction2/data/{args.dataset}/splits"
     # config.DATA.PATH_PREFIX = f"{os.path.expanduser('~')}/repo/mmaction2/data/{args.dataset}/videos"
+    multiview_clips = config.TEST.NUM_ENSEMBLE_VIEWS
+    multiview_crops = config.TEST.NUM_SPATIAL_CROPS
+    
     config.TEST.NUM_SPATIAL_CROPS = 1
     if args.dataset == "ucf101":
         dataset_train = UCF101(cfg=config, mode="train", num_retries=10)
         dataset_val = UCF101(cfg=config, mode="val", num_retries=10)
-        config.TEST.NUM_ENSEMBLE_VIEWS = 1
-        config.TEST.NUM_SPATIAL_CROPS = 3
+        config.TEST.NUM_ENSEMBLE_VIEWS = multiview_clips
+        config.TEST.NUM_SPATIAL_CROPS = multiview_crops
         multi_crop_val = UCF101(cfg=config, mode="val", num_retries=10)
     elif args.dataset == "hmdb51":
         dataset_train = HMDB51(cfg=config, mode="train", num_retries=10)
@@ -72,14 +76,14 @@ def eval_linear(args):
     elif args.dataset == "diving48" :
         dataset_train = Diving48(cfg=config, mode="train", num_retries=10)
         dataset_val = Diving48(cfg=config, mode="val", num_retries=10)
-        config.TEST.NUM_SPATIAL_CROPS=3
-        config.NUM_ENSEMBLE_VIEWS=1
+        config.TEST.NUM_ENSEMBLE_VIEWS = multiview_clips
+        config.TEST.NUM_SPATIAL_CROPS = multiview_crops
         multi_crop_val=Diving48(cfg=config, mode="val", num_retries=10)
     else:
         raise NotImplementedError(f"invalid dataset: {args.dataset}")
 
     train_sampler = torch.utils.data.distributed.DistributedSampler(dataset_train, shuffle=True)
-    # val_sampler = torch.utils.data.distributed.DistributedSampler(dataset_val, shuffle=False)
+    val_sampler = torch.utils.data.distributed.DistributedSampler(dataset_val, shuffle=False)
     
     train_loader = torch.utils.data.DataLoader(
         dataset_train,
@@ -90,6 +94,7 @@ def eval_linear(args):
     )
     val_loader = torch.utils.data.DataLoader(    #* shuffle=False
         dataset_val,
+        sampler=val_sampler,
         batch_size=args.batch_size_per_gpu,
         num_workers=args.num_workers,
         pin_memory=True,
