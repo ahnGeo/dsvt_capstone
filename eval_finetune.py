@@ -21,12 +21,31 @@ from torch import nn
 from tqdm import tqdm
 
 from datasets import UCF101, HMDB51, Kinetics, KTH, Diving48
-from models import get_vit_base_patch16_224, SwinTransformer3D, get_vmae_vit_base_patch16_224
+from models import get_vit_base_patch16_224, SwinTransformer3D, get_vmae_vit_base_patch16_224, get_gap_vit_base_patch16_224
 from utils import utils
 from utils.meters import TestMeter
 from utils.parser import load_config
 # from torchsummary import summary as summary
 import numpy as np
+
+#^ for load ca_head
+# class MultiCropWrapper(nn.Module):
+#     def __init__(self, backbone, ca_head):
+#         super(MultiCropWrapper, self).__init__()
+#         # disable layers dedicated to ImageNet labels classification
+#         backbone.fc, backbone.head = nn.Identity(), nn.Identity()
+#         self.backbone = backbone
+#         self.ca_head = ca_head
+#         self.head = nn.Linear(768, 101)
+        
+
+#     def forward(self, x, head_only=False, loc=True):
+#         output = self.backbone(x)
+#         # logits = self.ca_head(output, loc)  #^ logits = self.norm(torch.cat([glo_tokens, loc_tokens], dim=1))
+#         logits = self.ca_head(output, loc=False) 
+        
+#         return self.head(logits[:,:1]).reshape((-1, 101))
+
 
 def eval_linear(args):
 
@@ -43,7 +62,6 @@ def eval_linear(args):
     cudnn.benchmark = True
     os.makedirs(args.output_dir, exist_ok=True)
     json.dump(vars(args), open(f"{args.output_dir}/config.json", "w"), indent=4)
-    print(config)
 
     # ============ preparing data ... ============
     # config.DATA.PATH_TO_DATA_DIR = f"{os.path.expanduser('~')}/repo/mmaction2/data/{args.dataset}/splits"
@@ -83,7 +101,7 @@ def eval_linear(args):
         raise NotImplementedError(f"invalid dataset: {args.dataset}")
 
     train_sampler = torch.utils.data.distributed.DistributedSampler(dataset_train, shuffle=True)
-    val_sampler = torch.utils.data.distributed.DistributedSampler(dataset_val, shuffle=False)
+    # val_sampler = torch.utils.data.distributed.DistributedSampler(dataset_val, shuffle=False)
     
     train_loader = torch.utils.data.DataLoader(
         dataset_train,
@@ -94,7 +112,6 @@ def eval_linear(args):
     )
     val_loader = torch.utils.data.DataLoader(    #* shuffle=False
         dataset_val,
-        sampler=val_sampler,
         batch_size=args.batch_size_per_gpu,
         num_workers=args.num_workers,
         pin_memory=True,
@@ -125,8 +142,15 @@ def eval_linear(args):
         elif args.arch == "swin":
             model = SwinTransformer3D(depths=[2, 2, 18, 2], embed_dim=128, num_heads=[4, 8, 16, 32])
             model_embed_dim = 1024
+        elif args.arch == "gap_vit_base" :
+            model = get_gap_vit_base_patch16_224(cfg=config, no_head=False)
         # elif args.arch == "dsvt_ca_head" :
-        #     model = 
+        #     model = get_vit_base_patch16_224(cfg=config, no_head=True)     #^ head = linear classifier
+        #     embed_dim = model.embed_dim
+        #     print("embed_dim", embed_dim)
+        #     model = MultiCropWrapper(model, 
+        #             SelfPatchHead(embed_dim, model.num_heads, args.k_num, attention_type=args.patchHead_attention, sampling=args.patch_sampling))
+        #             # SelfPatchHead(embed_dim, model.num_heads, 8, attention_type='divided_space_time',sampling='cubic'))
         else:
             raise Exception(f"invalid model: {args.arch}")
     
@@ -151,10 +175,12 @@ def eval_linear(args):
 
         renamed_checkpoint = {x[len("backbone."):]: y for x, y in ckpt.items() if x.startswith("backbone.") and "head" not in x}
 
-        if args.dsvt :
-            renamed_checkpoint['cls_token'] = ckpt['ca_head.cls_token']
-            renamed_checkpoint['norm.weight'] = ckpt['ca_head.norm.weight']
-            renamed_checkpoint['norm.bias'] = ckpt['ca_head.norm.bias']
+        #^ CLS not use, random init
+        # if args.dsvt :
+        #     renamed_checkpoint['cls_token'] = ckpt['ca_head.cls_token']
+        #     renamed_checkpoint['norm.weight'] = ckpt['ca_head.norm.weight']
+        #     renamed_checkpoint['norm.bias'] = ckpt['ca_head.norm.bias']
+        # if load ca_head, no need set renamed_checkpoint, and msg = p_head, c_head
         
         msg = model_without_ddp.load_state_dict(renamed_checkpoint, strict=False)
         print("load pretrained model on eval_finetune.py")
@@ -165,14 +191,17 @@ def eval_linear(args):
         
         if "vitb" in args.pretrained_weights :   #* svt k400 pretrained weights from repo
             renamed_checkpoint = {x[len("backbone."):]: y for x, y in ckpt.items() if x.startswith("backbone.")}
+            
         elif "TimeSformer" in args.pretrained_weights :
             ckpt = ckpt['model_state']
             renamed_checkpoint = {x[len("model."):]: y for x, y in ckpt.items() if x.startswith("model.") and not "head" in x}
+            
         elif "vmae" in args.pretrained_weights :
             ckpt = ckpt['model']
             renamed_checkpoint = {x[len("encoder."):]: y for x, y in ckpt.items() if x.startswith("encoder.") and not "head" in x}
             renamed_checkpoint['fc_norm.weight'] = renamed_checkpoint['norm.weight']
             renamed_checkpoint['fc_norm.bias'] = renamed_checkpoint['norm.bias']
+            
         else :
             renamed_checkpoint = ckpt
 
@@ -191,11 +220,11 @@ def eval_linear(args):
     else :
         print(f"#################################################\nfinetuning with {n} layers\n#################################################")
     
-    if n >= 1 :
+    if n >= 1 :  #* finetune only last n blocks
         assert args.arch == "vit_base"
         # then
         on_block = [str(12 - i) for i in range(1, n + 1)]    #* finetune only the last layer -> on_block = ["11"]
-        for name, param in model.named_parameters() :
+        for name, param in model_without_ddp.named_parameters() :
             if "." not in name :
                 param.requires_grad = False
             elif name.split(".")[1] in on_block : 
@@ -208,18 +237,19 @@ def eval_linear(args):
             else :
                 param.requires_grad = False
     
-    if n == -1 :
-        for name, param in model.named_parameters() :
-            if "head" in name :
+    if n == -1 :  #* linear probe
+        for name, param in model_without_ddp.named_parameters() :
+            if name == 'head.weight' or name == 'head.bias' :
                 param.requires_grad = True
+            elif "gap" in args.arch and (name == 'norm.weight' or name == 'norm.bias') : #^ if gap is set, norm should be requires_grad True
+                param.requires_grad = True 
             else :
                 param.requires_grad = False
 
-    # for n, p in model.named_parameters() :
-    #     print(n, p.requires_grad)
+    for n, p in model.named_parameters() :
+        print(n, p.requires_grad)
 
     params_groups = utils.get_params_groups(model)
-    
     
     # set optimizer
     if not args.eval_linear :
@@ -440,7 +470,7 @@ if __name__ == '__main__':
                         help="""Whether ot not to concatenate the global average pooled features to the [CLS] token.
         We typically set this to False for ViT-Small and to True with ViT-Base.""")
     parser.add_argument('--arch', default='vit_small', type=str,
-                        choices=['vit_tiny', 'vit_small', 'vit_base', 'swin', 'vmae_vit_base'],
+                        choices=['vit_base', 'gap_vit_base', 'vame_vit_base', 'dsvt_ca_head'],
                         help='Architecture (support only ViT atm).')
     parser.add_argument('--patch_size', default=16, type=int, help='Patch resolution of the model.')
     parser.add_argument('--pretrained_weights', default='', type=str, help="Path to pretrained weights to evaluate.")
@@ -462,9 +492,11 @@ if __name__ == '__main__':
     parser.add_argument('--num_labels', default=1000, type=int, help='Number of labels for linear classifier')
     parser.add_argument('--dataset', default="ucf101", help='Dataset: ucf101 / hmdb51')
     parser.add_argument('--use_flow', default=False, type=utils.bool_flag, help="use flow teacher")
-    parser.add_argument('--img_pretrained', default=False, type=utils.bool_flag)
-    parser.add_argument('--dsvt', default=False, type=utils.bool_flag)
-    parser.add_argument("--eval_linear", default=False, type=utils.bool_flag)
+    
+    
+    parser.add_argument('--img_pretrained', default=False, type=utils.bool_flag, help='load weights pretrained on an image model')
+    parser.add_argument('--dsvt', default=False, type=utils.bool_flag, help='set find_unused_parameter True')
+    parser.add_argument("--eval_linear", default=False, type=utils.bool_flag, help='set optimizer and scheduler for linear probing')
     
 
     # config file
